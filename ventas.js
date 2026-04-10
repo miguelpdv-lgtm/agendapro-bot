@@ -182,13 +182,17 @@ async function ejecutarVenta(productos) {
         .find((b) => b.innerText?.toLowerCase().includes('continuar'))?.click();
     });
 
-    // ── MÉTODO DE PAGO ───────────────────────────────────────────────────────
-    await frame.waitForSelector('[data-testid^="select-payment-method"]');
-    await frame.evaluate(() => {
-      document.querySelector(
-        '[data-testid="select-payment-method-Transferencia Bancaria"]'
-      )?.click();
-    });
+// ── MÉTODO DE PAGO ───────────────────────────────────────────────────────────
+await delay(3000); // espera extra
+
+// Debug: muestra qué botones hay en el frame
+const botonesFrame = await frame.evaluate(() =>
+  Array.from(document.querySelectorAll('button, [data-testid]'))
+    .map(el => ({ tag: el.tagName, testid: el.dataset.testid, texto: el.innerText?.trim().slice(0,50) }))
+);
+console.log('🔍 Elementos en frame:', JSON.stringify(botonesFrame, null, 2));
+
+await frame.waitForSelector('[data-testid^="select-payment-method"]');
 
     console.log('✅ Venta completada');
     return { mensaje: 'Venta completada exitosamente', productos: productos.length };
