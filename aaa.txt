@@ -1,6 +1,0 @@
-AGENDAPRO_EMAIL=Emarizosadmon@gmail.com 
-AGENDAPRO_PASSWORD=Emarizos2024$
-AGENDAPRO_URL=https://app.agendapro.com/products/sales
-SUPABASE_URL=https://brsfhhhwqxtzcyesqkry.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sb_publishable_yNi5My_8cwkmBMa0BtF73A_8ITztTVv
-PORT=3000
