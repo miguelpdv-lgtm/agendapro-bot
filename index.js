@@ -3,8 +3,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 require('dotenv').config();
 const express = require('express');
-const cola    = require('./cola.cjs');
-const { sincronizarInventario } = require('./inventario.cjs');
+const cola    = require('./cola.js');
+const { sincronizarInventario } = require('./inventario.js');
 
 const app = express();
 app.use(express.json());
