@@ -162,37 +162,31 @@ async function ejecutarVenta(productos) {
       console.log(`✅ ${prod.nombre} agregado`);
     }
 
-    // ── IR AL CARRO ──────────────────────────────────────────────────────────
-    await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll('button'))
-        .some((b) => b.innerText?.toLowerCase().includes('ir al carro'))
-    );
-    await frame.evaluate(() => {
-      Array.from(document.querySelectorAll('button'))
-        .find((b) => b.innerText?.toLowerCase().includes('ir al carro'))?.click();
-    });
+// ── IR AL CARRO ──────────────────────────────────────────────────────────────
+await frame.waitForFunction(() =>
+  Array.from(document.querySelectorAll('button'))
+    .some((b) => b.innerText?.toLowerCase().includes('ir al carro'))
+);
+await frame.evaluate(() => {
+  Array.from(document.querySelectorAll('button'))
+    .find((b) => b.innerText?.toLowerCase().includes('ir al carro'))?.click();
+});
 
-    // ── CONTINUAR ────────────────────────────────────────────────────────────
-    await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll('button'))
-        .some((b) => b.innerText?.toLowerCase().includes('continuar'))
-    );
-    await frame.evaluate(() => {
-      Array.from(document.querySelectorAll('button'))
-        .find((b) => b.innerText?.toLowerCase().includes('continuar'))?.click();
-    });
+// ── CONTINUAR (por data-testid) ───────────────────────────────────────────────
+await frame.waitForSelector('[data-testid="cart-continue-button"]', { timeout: 15000 });
+await delay(500);
+await frame.evaluate(() => {
+  document.querySelector('[data-testid="cart-continue-button"]')?.click();
+});
+console.log('✅ Continuar clickeado');
 
 // ── MÉTODO DE PAGO ───────────────────────────────────────────────────────────
-await delay(3000); // espera extra
-
-// Debug: muestra qué botones hay en el frame
-const botonesFrame = await frame.evaluate(() =>
-  Array.from(document.querySelectorAll('button, [data-testid]'))
-    .map(el => ({ tag: el.tagName, testid: el.dataset.testid, texto: el.innerText?.trim().slice(0,50) }))
-);
-console.log('🔍 Elementos en frame:', JSON.stringify(botonesFrame, null, 2));
-
-await frame.waitForSelector('[data-testid^="select-payment-method"]');
+await frame.waitForSelector('[data-testid^="select-payment-method"]', { timeout: 30000 });
+await frame.evaluate(() => {
+  document.querySelector(
+    '[data-testid="select-payment-method-Transferencia Bancaria"]'
+  )?.click();
+});
 
     console.log('✅ Venta completada');
     return { mensaje: 'Venta completada exitosamente', productos: productos.length };
