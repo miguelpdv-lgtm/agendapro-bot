@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.png
+productos.json
+productos.csv
+aaa.txt
