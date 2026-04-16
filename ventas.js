@@ -158,12 +158,12 @@ async function ejecutarVenta(productos) {
 
       await frame.waitForFunction(() =>
         Array.from(document.querySelectorAll('[role="option"]')).some((el) =>
-          el.innerText?.toLowerCase().includes("uso del salon"),
+          el.innerText?.toLowerCase().includes("ema"),
         ),
       );
       await frame.evaluate(() => {
         Array.from(document.querySelectorAll('[role="option"]'))
-          .find((el) => el.innerText?.toLowerCase().includes("uso del salon"))
+          .find((el) => el.innerText?.toLowerCase().includes("ema"))
           ?.click();
       });
 
@@ -254,8 +254,6 @@ await frame.evaluate(() => {
 
 console.log("✅ Continuar clickeado");
 
-
-// ── MÉTODO DE PAGO ──────────────────────────────────────────────────────────
 // ── MÉTODO DE PAGO ──────────────────────────────────────────────────────────
 await delay(3000);
 console.log("➡️ Esperando panel de método de pago...");
