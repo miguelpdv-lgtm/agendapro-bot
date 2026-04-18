@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 require('dotenv').config();
 const express = require('express');
+const cron    = require('node-cron'); // Importamos node-cron
 const cola    = require('./cola');
 const { sincronizarInventario } = require('./inventario');
 
@@ -27,11 +28,7 @@ const autenticar = (req, res, next) => {
   next();
 };
 
-// ... el resto igual
-
 // ── POST /venta ───────────────────────────────────────────────────────────────
-// Encola la venta y responde inmediato con la posición en cola.
-// Body: { "productos": [{ "nombre": "Gel Azul", "cantidad": 2 }] }
 app.post('/venta', autenticar, (req, res) => {
   const { productos } = req.body;
   if (!Array.isArray(productos) || productos.length === 0) {
@@ -53,8 +50,6 @@ app.post('/venta', autenticar, (req, res) => {
 });
 
 // ── POST /venta/sync ──────────────────────────────────────────────────────────
-// Encola y ESPERA el resultado antes de responder.
-// ⚠️ El cliente debe tener timeout > 120s.
 app.post('/venta/sync', autenticar, async (req, res) => {
   const { productos } = req.body;
   if (!Array.isArray(productos) || productos.length === 0) {
@@ -75,7 +70,6 @@ app.get('/cola', autenticar, (req, res) => {
 });
 
 // ── POST /inventario/sync ─────────────────────────────────────────────────────
-// Dispara una sincronización manual de inventario sin esperar el resultado.
 app.post('/inventario/sync', autenticar, (req, res) => {
   sincronizarInventario()
     .then(() => console.log('✅ Sync manual completado'))
@@ -87,9 +81,7 @@ app.post('/inventario/sync', autenticar, (req, res) => {
 // ── GET /health ───────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', hora: new Date().toISOString() }));
 
-// ── SCHEDULER — inventario cada 15 minutos ────────────────────────────────────
-const INTERVALO_MS = 15 * 60 * 1000; // 15 minutos
-
+// ── LÓGICA DEL SCHEDULER ──────────────────────────────────────────────────────
 let syncEnCurso = false;
 
 async function tickInventario() {
@@ -100,6 +92,8 @@ async function tickInventario() {
   syncEnCurso = true;
   try {
     await sincronizarInventario();
+  } catch (error) {
+    console.error('❌ [Scheduler] Error en tickInventario:', error.message);
   } finally {
     syncEnCurso = false;
   }
@@ -109,17 +103,21 @@ async function tickInventario() {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`\n🚀 AgendaPro Bot corriendo en puerto ${PORT}`);
-  console.log('   POST /venta            → encola venta (respuesta inmediata)');
-  console.log('   POST /venta/sync       → encola venta (espera resultado)');
-  console.log('   GET  /cola             → estado de la cola');
-  console.log('   POST /inventario/sync  → sync manual de inventario');
-  console.log('   GET  /health           → healthcheck\n');
-
-  // Primera sincronización al arrancar
-  console.log('⏰ [Scheduler] Ejecutando sincronización inicial...');
+  
+  // Sincronización inicial al arrancar (solo si está en horario permitido)
+  // O puedes dejarla siempre activa para validar conexión al encender el server:
+  console.log('⏰ [Scheduler] Ejecutando sincronización inicial de arranque...');
   await tickInventario();
 
-  // Luego cada 15 minutos
-  setInterval(tickInventario, INTERVALO_MS);
-  console.log(`⏰ [Scheduler] Próxima sincronización automática en 15 minutos`);
+  // PROGRAMACIÓN CRON: Cada 15 min, de 6am a 5:59pm, Hora Colombia
+  // Expresión: */15 (cada 15 min) | 6-17 (horas 6,7...17) | * * * (diario)
+  cron.schedule('*/15 6-17 * * *', async () => {
+    console.log('🔔 [Cron] Ejecutando sincronización programada (Horario 6AM-6PM)');
+    await tickInventario();
+  }, {
+    scheduled: true,
+    timezone: "America/Bogota"
+  });
+
+  console.log('⏰ [Scheduler] Cron configurado: 6:00 AM a 6:00 PM (Hora Colombia)');
 });
