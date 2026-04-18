@@ -69,6 +69,12 @@ async function actualizarStockEnSupabase(productos) {
   const mapaStock = {};
   for (const row of stockActual) mapaStock[String(row.id)] = row.stock;
 
+  // Lista de IDs a ignorar (no generarán advertencia ni se actualizarán)
+  const idsIgnorados = new Set([
+    '1156817', '1156822', '801850', '1153438', 
+    '1153445', '914694', '1156819'
+  ]);
+
   let actualizados  = 0;
   let sinCambios    = 0;
   let noEncontrados = 0;
@@ -78,6 +84,11 @@ async function actualizarStockEnSupabase(productos) {
     const id    = String(prod.id || '').trim();
     const stock = limpiarStock(prod.stock);
     if (!id) continue;
+
+    // Si el ID está en la lista negra, lo saltamos silenciosamente
+    if (idsIgnorados.has(id)) {
+      continue;
+    }
 
     if (!(id in mapaStock)) {
       console.warn(`⚠️  ID ${id} (${prod.nombre}) no está en Supabase`);
