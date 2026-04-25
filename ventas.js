@@ -109,10 +109,10 @@ async function ejecutarVenta(productos) {
       await delay(200);
 
       // Borrar contenido previo con teclado
-      await frame.keyboard.down("Control");
-      await frame.keyboard.press("KeyA");
-      await frame.keyboard.up("Control");
-      await frame.keyboard.press("Backspace");
+      await page.keyboard.down("Control");
+      await page.keyboard.press("KeyA");
+      await page.keyboard.up("Control");
+      await page.keyboard.press("Backspace");
       await delay(100);
 
       // frame.type() opera sobre el foco activo, sin necesitar ElementHandle
