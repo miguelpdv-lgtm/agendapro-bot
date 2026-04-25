@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  ventas.js — Lógica de ventas Puppeteer (headless para Railway)
+//  ventas.js — Lógica de ventas Puppeteer (headless para Railway)
 // ─────────────────────────────────────────────────────────────────────────────
 require("dotenv").config();
 const puppeteer = require("puppeteer");
@@ -10,279 +10,288 @@ const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
 // Espera que el input sea visible Y clickeable (no cubierto por otro elemento)
 async function esperarInputListo(frame, selector, timeout = 10000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const el = await frame.$(selector);
-      if (el) {
-        const box = await el.boundingBox();
-        if (box && box.width > 0 && box.height > 0) {
-          const visible = await frame.evaluate((sel) => {
-            const el = document.querySelector(sel);
-            if (!el) return false;
-            const rect = el.getBoundingClientRect();
-            const top = document.elementFromPoint(
-              rect.left + rect.width / 2,
-              rect.top + rect.height / 2,
-            );
-            return el === top || el.contains(top);
-          }, selector);
-          if (visible) return el;
-        }
-      }
-    } catch (_) {}
-    await delay(200);
-  }
-  throw new Error(`Input no estuvo listo: ${selector}`);
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const el = await frame.$(selector);
+      if (el) {
+        const box = await el.boundingBox();
+        if (box && box.width > 0 && box.height > 0) {
+          const visible = await frame.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const top = document.elementFromPoint(
+              rect.left + rect.width / 2,
+              rect.top + rect.height / 2,
+            );
+            return el === top || el.contains(top);
+          }, selector);
+          if (visible) return el;
+        }
+      }
+    } catch (_) {}
+    await delay(200);
+  }
+  throw new Error(`Input no estuvo listo: ${selector}`);
 }
 
 
 async function ejecutarVenta(productos) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-  });
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+  });
 
 
-  const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
+  const page = await browser.newPage();
+  page.setDefaultTimeout(30000);
 
 
-  try {
-    // ── LOGIN ────────────────────────────────────────────────────────────────
-    console.log("🔐 Login...");
-    await page.goto("https://app.agendapro.com/login", {
-      waitUntil: "networkidle2",
-    });
-    await page.waitForSelector('input[placeholder="user@example.com"]');
-    await page.type(
-      'input[placeholder="user@example.com"]',
-      process.env.AGENDAPRO_EMAIL,
-    );
-    await page.type(
-      'input[placeholder="Enter your password"]',
-      process.env.AGENDAPRO_PASSWORD,
-    );
-    await page.click("button");
-    await page.waitForNavigation({ waitUntil: "networkidle2" });
-    console.log("✅ Login OK");
+  try {
+    // ── LOGIN ────────────────────────────────────────────────────────────────
+    console.log("🔐 Login...");
+    await page.goto("https://app.agendapro.com/login", {
+      waitUntil: "networkidle2",
+    });
+    await page.waitForSelector('input[placeholder="user@example.com"]');
+    await page.type(
+      'input[placeholder="user@example.com"]',
+      process.env.AGENDAPRO_EMAIL,
+    );
+    await page.type(
+      'input[placeholder="Enter your password"]',
+      process.env.AGENDAPRO_PASSWORD,
+    );
+    await page.click("button");
+    await page.waitForNavigation({ waitUntil: "networkidle2" });
+    console.log("✅ Login OK");
 
 
-    // ── IR A VENTAS ──────────────────────────────────────────────────────────
-    await page.goto("https://app.agendapro.com/payments", {
-      waitUntil: "networkidle2",
-    });
+    // ── IR A VENTAS ──────────────────────────────────────────────────────────
+    await page.goto("https://app.agendapro.com/payments", {
+      waitUntil: "networkidle2",
+    });
 
 
-    // ── NUEVA VENTA ──────────────────────────────────────────────────────────
-    console.log("🆕 Nueva venta...");
-    await page.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some(
-        (b) => b.innerText?.trim() === "+ Nueva venta",
-      ),
-    );
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll("button"))
-        .find((b) => b.innerText?.trim() === "+ Nueva venta")
-        ?.click();
-    });
+    // ── NUEVA VENTA ──────────────────────────────────────────────────────────
+    console.log("🆕 Nueva venta...");
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some(
+        (b) => b.innerText?.trim() === "+ Nueva venta",
+      ),
+    );
+    await page.evaluate(() => {
+      Array.from(document.querySelectorAll("button"))
+        .find((b) => b.innerText?.trim() === "+ Nueva venta")
+        ?.click();
+    });
 
 
-    // ── IFRAME ───────────────────────────────────────────────────────────────
-    await page.waitForSelector('iframe[title="APIframe"]');
-    const frame = await (
-      await page.$('iframe[title="APIframe"]')
-    ).contentFrame();
-    console.log("✅ Iframe listo");
+    // ── IFRAME ───────────────────────────────────────────────────────────────
+    await page.waitForSelector('iframe[title="APIframe"]');
+    const frame = await (
+      await page.$('iframe[title="APIframe"]')
+    ).contentFrame();
+    console.log("✅ Iframe listo");
 
 
-    // ── ABRIR CARRO ──────────────────────────────────────────────────────────
-    await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some((b) =>
-        b.innerText?.toLowerCase().includes("agregar al carro"),
-      ),
-    );
-    await frame.evaluate(() => {
-      Array.from(document.querySelectorAll("button"))
-        .find((b) => b.innerText?.toLowerCase().includes("agregar al carro"))
-        ?.click();
-    });
+    // ── ABRIR CARRO ──────────────────────────────────────────────────────────
+    await frame.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some((b) =>
+        b.innerText?.toLowerCase().includes("agregar al carro"),
+      ),
+    );
+    await frame.evaluate(() => {
+      Array.from(document.querySelectorAll("button"))
+        .find((b) => b.innerText?.toLowerCase().includes("agregar al carro"))
+        ?.click();
+    });
+
+    // FIX: esperar a que la animación del panel termine antes de interactuar
+    await delay(1500);
 
 
-    // ── LOOP PRODUCTOS ───────────────────────────────────────────────────────
-    for (const prod of productos) {
-      console.log(`🛍️ Procesando: ${prod.nombre} x${prod.cantidad}`);
+    // ── LOOP PRODUCTOS ───────────────────────────────────────────────────────
+    for (const prod of productos) {
+      console.log(`🛍️ Procesando: ${prod.nombre} x${prod.cantidad}`);
+
+      // FIX: esperar que el input exista en el DOM antes de cualquier interacción
+      await frame.waitForSelector('input[type="text"]', { timeout: 10000 });
+      await delay(300);
+
+      // FIX: usar evaluate para el focus/click inicial (más robusto que el click nativo)
+      await frame.evaluate(() => {
+        const input = document.querySelector('input[type="text"]');
+        input?.focus();
+        input?.click();
+      });
+
+      // Seleccionar todo el texto y escribir el nombre del producto
+      const input = await frame.$('input[type="text"]');
+      await input.click({ clickCount: 3 });
+      await delay(200);
+      await input.type(prod.nombre, { delay: 60 });
 
 
-      // Buscador — esperar que esté visible Y clickeable
-      const input = await esperarInputListo(frame, 'input[type="text"]');
-      await input.click({ clickCount: 3 });
-      await delay(200);
-      await input.type(prod.nombre, { delay: 60 });
+      // Esperar que aparezca el botón del producto
+      await frame.waitForFunction(
+        (nombre) =>
+          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
+        { timeout: 8000 },
+        prod.nombre,
+      );
 
 
-      // Esperar que aparezca el botón del producto
-      await frame.waitForFunction(
-        (nombre) =>
-          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
-        { timeout: 8000 },
-        prod.nombre,
-      );
+      // Primer click — agregar producto
+      await frame.evaluate((nombre) => {
+        document
+          .querySelector(`[data-testid="${nombre}-show-counter"]`)
+          ?.click();
+      }, prod.nombre);
 
 
-      // Primer click — agregar producto
-      await frame.evaluate((nombre) => {
-        document
-          .querySelector(`[data-testid="${nombre}-show-counter"]`)
-          ?.click();
-      }, prod.nombre);
+      // ── PROFESIONAL ──────────────────────────────────────────────────────
+      await frame.waitForSelector(
+        '[data-testid="associate-item-seller-select"]',
+        { timeout: 8000 },
+      );
+      await frame.evaluate(() => {
+        document
+          .querySelector('[data-testid="associate-item-seller-select"]')
+          ?.click();
+      });
 
 
-      // ── PROFESIONAL ──────────────────────────────────────────────────────
-      await frame.waitForSelector(
-        '[data-testid="associate-item-seller-select"]',
-        { timeout: 8000 },
-      );
-      await frame.evaluate(() => {
-        document
-          .querySelector('[data-testid="associate-item-seller-select"]')
-          ?.click();
-      });
+      await frame.waitForFunction(() =>
+        Array.from(document.querySelectorAll('[role="option"]')).some((el) =>
+          el.innerText?.toLowerCase().includes("ema"),
+        ),
+      );
+      await frame.evaluate(() => {
+        Array.from(document.querySelectorAll('[role="option"]'))
+          .find((el) => el.innerText?.toLowerCase().includes("ema"))
+          ?.click();
+      });
 
 
-      await frame.waitForFunction(() =>
-        Array.from(document.querySelectorAll('[role="option"]')).some((el) =>
-          el.innerText?.toLowerCase().includes("ema"),
-        ),
-      );
-      await frame.evaluate(() => {
-        Array.from(document.querySelectorAll('[role="option"]'))
-          .find((el) => el.innerText?.toLowerCase().includes("ema"))
-          ?.click();
-      });
+      // Esperar que el dropdown cierre
+      await frame
+        .waitForFunction(
+          () => document.querySelectorAll('[role="option"]').length === 0,
+          { timeout: 3000 },
+        )
+        .catch(() => {});
+      await delay(300);
 
 
-      // Esperar que el dropdown cierre
-      await frame
-        .waitForFunction(
-          () => document.querySelectorAll('[role="option"]').length === 0,
-          { timeout: 3000 },
-        )
-        .catch(() => {});
-      await delay(300);
+      // ── CANTIDAD ─────────────────────────────────────────────────────────
+      if (prod.cantidad > 1) {
+        console.log("🔢 Ajustando cantidad...");
+        for (let i = 1; i < prod.cantidad; i++) {
+          await frame.evaluate((nombre) => {
+            document
+              .querySelector(`[data-testid="${nombre}-show-counter"]`)
+              ?.click();
+          }, prod.nombre);
 
 
-      // ── CANTIDAD ─────────────────────────────────────────────────────────
-      if (prod.cantidad > 1) {
-        console.log("🔢 Ajustando cantidad...");
-        for (let i = 1; i < prod.cantidad; i++) {
-          await frame.evaluate((nombre) => {
-            document
-              .querySelector(`[data-testid="${nombre}-show-counter"]`)
-              ?.click();
-          }, prod.nombre);
+          await frame.waitForSelector(`[data-testid="${prod.nombre}-add"]`, {
+            timeout: 5000,
+          });
 
 
-          await frame.waitForSelector(`[data-testid="${prod.nombre}-add"]`, {
-            timeout: 5000,
-          });
+          await frame.evaluate((nombre) => {
+            document.querySelector(`[data-testid="${nombre}-add"]`)?.click();
+          }, prod.nombre);
 
 
-          await frame.evaluate((nombre) => {
-            document.querySelector(`[data-testid="${nombre}-add"]`)?.click();
-          }, prod.nombre);
+          const esperado = i + 1;
+          await frame.waitForFunction(
+            (nombre, val) => {
+              const btn = document.querySelector(
+                `[data-testid="${nombre}-show-counter"]`,
+              );
+              return btn?.innerText?.trim() === String(val);
+            },
+            { timeout: 4000 },
+            prod.nombre,
+            esperado,
+          );
+        }
+      }
 
 
-          const esperado = i + 1;
-          await frame.waitForFunction(
-            (nombre, val) => {
-              const btn = document.querySelector(
-                `[data-testid="${nombre}-show-counter"]`,
-              );
-              return btn?.innerText?.trim() === String(val);
-            },
-            { timeout: 4000 },
-            prod.nombre,
-            esperado,
-          );
-        }
-      }
+      console.log(`✅ ${prod.nombre} agregado`);
+    }
 
 
-      console.log(`✅ ${prod.nombre} agregado`);
-    }
+    // ── IR AL CARRO ──────────────────────────────────────────────────────────
+    await frame.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some((b) =>
+        b.innerText?.toLowerCase().includes("ir al carro"),
+      ),
+    );
+    await frame.evaluate(() => {
+      Array.from(document.querySelectorAll("button"))
+        .find((b) => b.innerText?.toLowerCase().includes("ir al carro"))
+        ?.click();
+    });
 
+    // ── CONTINUAR ───────────────────────────────────────────────────────────
+    await delay(3000);
+    console.log("➡️ Click en Continuar...");
 
-    // ── IR AL CARRO ──────────────────────────────────────────────────────────────
-    await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some((b) =>
-        b.innerText?.toLowerCase().includes("ir al carro"),
-      ),
-    );
-    await frame.evaluate(() => {
-      Array.from(document.querySelectorAll("button"))
-        .find((b) => b.innerText?.toLowerCase().includes("ir al carro"))
-        ?.click();
-    });
+    await frame.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button"))
+        .some(b => b.innerText?.toLowerCase().includes("continuar"))
+    );
 
-// ── CONTINUAR ───────────────────────────────────────────────────────────────
-await delay(3000);
-console.log("➡️ Click en Continuar...");
+    await frame.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll("button"))
+        .find(b => b.innerText?.toLowerCase().includes("continuar"));
 
-// Esperar botón por texto (igual a tu lógica anterior)
-await frame.waitForFunction(() =>
-  Array.from(document.querySelectorAll("button"))
-    .some(b => b.innerText?.toLowerCase().includes("continuar"))
-);
+      if (btn) {
+        btn.scrollIntoView({ block: "center" });
+        btn.click();
+      }
+    });
 
-// Click limpio
-await frame.evaluate(() => {
-  const btn = Array.from(document.querySelectorAll("button"))
-    .find(b => b.innerText?.toLowerCase().includes("continuar"));
+    console.log("✅ Continuar clickeado");
 
-  if (btn) {
-    btn.scrollIntoView({ block: "center" });
-    btn.click();
+    // ── MÉTODO DE PAGO ──────────────────────────────────────────────────────
+    await delay(3000);
+    console.log("➡️ Esperando panel de método de pago...");
+
+    await frame.waitForSelector('[data-testid="select-payment-method"]', {
+      timeout: 10000,
+    });
+
+    await frame.waitForFunction(() => {
+      const btn = document.querySelector(
+        '[data-testid="select-payment-method-Transferencia Bancaria"]'
+      );
+      return btn && !btn.disabled;
+    }, { timeout: 10000 });
+
+    await frame.evaluate(() => {
+      document
+        .querySelector('[data-testid="select-payment-method-Transferencia Bancaria"]')
+        ?.click();
+    });
+
+    console.log("✅ Transferencia Bancaria seleccionada");
+    await delay(3000);
+
+  } finally {
+    await browser.close();
   }
-});
-
-console.log("✅ Continuar clickeado");
-
-// ── MÉTODO DE PAGO ──────────────────────────────────────────────────────────
-await delay(3000);
-console.log("➡️ Esperando panel de método de pago...");
-
-// Esperar el contenedor del panel de pago
-await frame.waitForSelector('[data-testid="select-payment-method"]', {
-  timeout: 10000,
-});
-
-// Esperar que el botón de Transferencia esté presente Y no esté disabled
-await frame.waitForFunction(() => {
-  const btn = document.querySelector(
-    '[data-testid="select-payment-method-Transferencia Bancaria"]'
-  );
-  return btn && !btn.disabled;
-}, { timeout: 10000 });
-
-// Hacer click
-await frame.evaluate(() => {
-  document
-    .querySelector('[data-testid="select-payment-method-Transferencia Bancaria"]')
-    ?.click();
-});
-
-console.log("✅ Transferencia Bancaria seleccionada");
-await delay(3000);
-  } finally {
-    await browser.close();
-  }
 }
 
 
