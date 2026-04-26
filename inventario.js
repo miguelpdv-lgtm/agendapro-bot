@@ -72,7 +72,7 @@ async function actualizarStockEnSupabase(productos) {
   // Lista de IDs a ignorar (no generarán advertencia ni se actualizarán)
   const idsIgnorados = new Set([
     '1156817', '1156822', '801850', '1153438', 
-    '1153445', '914694', '1156819'
+    '1153445', '914694', '1156819' , '821517'
   ]);
 
   let actualizados  = 0;
