@@ -7,11 +7,11 @@ const puppeteer = require('puppeteer');
 const fs        = require('fs');
 const { createClient } = require('@supabase/supabase-js');
 
-const EMAIL                 = process.env.AGENDAPRO_EMAIL;
-const PASSWORD              = process.env.AGENDAPRO_PASSWORD;
-const SUPABASE_URL          = process.env.SUPABASE_URL;
+const EMAIL                     = process.env.AGENDAPRO_EMAIL;
+const PASSWORD                  = process.env.AGENDAPRO_PASSWORD;
+const SUPABASE_URL               = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const URL_INVENTARIO        = 'https://app.agendapro.com/products/inventory';
+const URL_INVENTARIO            = 'https://app.agendapro.com/products/inventory';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const delay    = ms => new Promise(r => setTimeout(r, ms));
@@ -71,8 +71,8 @@ async function actualizarStockEnSupabase(productos) {
 
   // Lista de IDs a ignorar (no generarán advertencia ni se actualizarán)
   const idsIgnorados = new Set([
-    '1156817', '1156822', '801850', '1153438', 
-    '1153445', '914694', '1156819' , '821517'
+    '1156817', '1156822', '801850', '1153438',
+    '1153445', '914694', '1156819', '821517'
   ]);
 
   let actualizados  = 0;
@@ -86,9 +86,7 @@ async function actualizarStockEnSupabase(productos) {
     if (!id) continue;
 
     // Si el ID está en la lista negra, lo saltamos silenciosamente
-    if (idsIgnorados.has(id)) {
-      continue;
-    }
+    if (idsIgnorados.has(id)) continue;
 
     if (!(id in mapaStock)) {
       console.warn(`⚠️  ID ${id} (${prod.nombre}) no está en Supabase`);
@@ -126,12 +124,18 @@ async function sincronizarInventario() {
   console.log(`\n🔄 [Inventario] Iniciando sincronización: ${new Date().toLocaleString()}`);
 
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: true,                           // FIX: 'new' → true, más liviano y estable
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
+      '--disable-dev-shm-usage',              // FIX: crítico en VPS/Railway con /dev/shm pequeño
       '--disable-gpu',
+      '--no-zygote',                          // FIX: evita proceso zygote hijo
+      '--single-process',                     // FIX: todo en un proceso → menos PIDs consumidos
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--mute-audio',
     ],
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   });
@@ -139,17 +143,30 @@ async function sincronizarInventario() {
   const page = await browser.newPage();
   page.setDefaultTimeout(30000);
 
+  // FIX: bloquear recursos innecesarios → Chrome vive menos tiempo, consume menos RAM
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    const tipo = req.resourceType();
+    if (['image', 'stylesheet', 'font', 'media'].includes(tipo)) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+
   try {
     console.log('🔐 Login inventario...');
-    await page.goto('https://app.agendapro.com/login', { waitUntil: 'networkidle2' });
+    // FIX: domcontentloaded es más rápido y confiable que networkidle2
+    await page.goto('https://app.agendapro.com/login', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('input[placeholder="user@example.com"]');
-    await page.type('input[placeholder="user@example.com"]', EMAIL);
-    await page.type('input[placeholder="Enter your password"]', PASSWORD);
-    await page.click('button');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await page.type('input[placeholder="user@example.com"]', EMAIL, { delay: 40 });
+    await page.type('input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
+    // FIX: selector específico en vez de 'button' genérico para no clickear el botón equivocado
+    await page.click('button[type="submit"]');
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded' });
     console.log('✅ Login OK');
 
-    await page.goto(URL_INVENTARIO, { waitUntil: 'networkidle2' });
+    await page.goto(URL_INVENTARIO, { waitUntil: 'domcontentloaded' });
     await delay(2500);
 
     let ctx = page;
@@ -198,8 +215,11 @@ async function sincronizarInventario() {
 
   } catch (e) {
     console.error('❌ [Inventario] Error general:', e.message);
+    throw e; // FIX: re-lanza el error para que el scheduler en index.js lo capture correctamente
   } finally {
-    await browser.close();
+    // FIX: cerrar página primero, luego el browser — ambos con .catch() para evitar errores en finally
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
   }
 }
 
