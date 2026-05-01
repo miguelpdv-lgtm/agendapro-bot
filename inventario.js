@@ -39,6 +39,7 @@ async function clickLoginButton(page) {
   await page.keyboard.press('Enter');
 }
 
+// ── Extrae las filas de la tabla de inventario ────────────────────────────────
 async function extraerFilas(ctx) {
   return await ctx.evaluate(() => {
     const filas = [...document.querySelectorAll('tbody[role="rowgroup"] tr[role="row"]')];
@@ -64,6 +65,7 @@ async function extraerFilas(ctx) {
   });
 }
 
+// ── Genera CSV desde array de productos ──────────────────────────────────────
 function toCSV(productos) {
   const headers = ['id','codigo','nombre','categoria','marca','formato','precio','stock'];
   const escape  = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -71,26 +73,45 @@ function toCSV(productos) {
   return [headers.join(','), ...rows].join('\n');
 }
 
+// ── Limpia el valor de stock a número entero ──────────────────────────────────
 function limpiarStock(valor) {
   if (valor == null) return 0;
   const limpio = String(valor).replace(/[^\d-]/g, '');
   return limpio === '' ? 0 : Number(limpio);
 }
 
+// ── Limpia el valor de precio a número flotante ───────────────────────────────
+function limpiarPrecio(valor) {
+  if (valor == null || valor === '') return null;
+  // Elimina símbolo de moneda, espacios y separadores de miles; normaliza coma decimal
+  const limpio = String(valor)
+    .replace(/[^0-9,.-]/g, '')   // quita $, letras, espacios, etc.
+    .replace(/\.(?=\d{3})/g, '') // quita puntos de miles (ej: 1.000 → 1000)
+    .replace(',', '.');          // normaliza coma decimal → punto
+  const num = parseFloat(limpio);
+  return isNaN(num) ? null : num;
+}
+
+// ── Sincroniza stock Y precio con Supabase ────────────────────────────────────
 async function actualizarStockEnSupabase(productos) {
-  console.log('\n☁️  Sincronizando stock con Supabase...\n');
+  console.log('\n☁️  Sincronizando stock y precios con Supabase...\n');
 
   const { data: stockActual, error: errorLectura } = await supabase
     .from('products')
-    .select('id, stock');
+    .select('id, stock, precio');
 
   if (errorLectura) {
     console.error('❌ No se pudo leer products:', errorLectura.message);
     return;
   }
 
-  const mapaStock = {};
-  for (const row of stockActual) mapaStock[String(row.id)] = row.stock;
+  const mapaProductos = {};
+  for (const row of stockActual) {
+    mapaProductos[String(row.id)] = {
+      stock:  row.stock,
+      precio: row.precio,
+    };
+  }
 
   const idsIgnorados = new Set([
     '1156817', '1156822', '801850', '1153438',
@@ -101,25 +122,39 @@ async function actualizarStockEnSupabase(productos) {
   let sinCambios    = 0;
   let noEncontrados = 0;
   let errores       = 0;
+  let cambiosStock  = 0;
+  let cambiosPrecio = 0;
 
   for (const prod of productos) {
-    const id    = String(prod.id || '').trim();
-    const stock = limpiarStock(prod.stock);
+    const id     = String(prod.id || '').trim();
+    const stock  = limpiarStock(prod.stock);
+    const precio = limpiarPrecio(prod.precio);
     if (!id) continue;
 
     if (idsIgnorados.has(id)) continue;
 
-    if (!(id in mapaStock)) {
+    if (!(id in mapaProductos)) {
       console.warn(`⚠️  ID ${id} (${prod.nombre}) no está en Supabase`);
       noEncontrados++;
       continue;
     }
 
-    if (mapaStock[id] === stock) { sinCambios++; continue; }
+    const stockAnterior  = mapaProductos[id].stock;
+    const precioAnterior = mapaProductos[id].precio;
+
+    const stockCambio  = stockAnterior !== stock;
+    const precioCambio = precio !== null && precioAnterior !== precio;
+
+    if (!stockCambio && !precioCambio) { sinCambios++; continue; }
+
+    // Construir objeto de actualización solo con los campos que cambiaron
+    const updates = {};
+    if (stockCambio)  updates.stock  = stock;
+    if (precioCambio) updates.precio = precio;
 
     const { error } = await supabase
       .from('products')
-      .update({ stock })
+      .update(updates)
       .eq('id', Number(id));
 
     if (error) {
@@ -128,15 +163,25 @@ async function actualizarStockEnSupabase(productos) {
       continue;
     }
 
-    console.log(`✅ ID ${id} | ${prod.nombre} → ${mapaStock[id]} → ${stock}`);
+    if (stockCambio) {
+      console.log(`📦 Stock  ID ${id} | ${prod.nombre} → ${stockAnterior} → ${stock}`);
+      cambiosStock++;
+    }
+    if (precioCambio) {
+      console.log(`💰 Precio ID ${id} | ${prod.nombre} → ${precioAnterior} → ${precio}`);
+      cambiosPrecio++;
+    }
+
     actualizados++;
   }
 
   console.log('\n══════════════════════════════════════');
-  console.log(`✅ Actualizados  : ${actualizados}`);
-  console.log(`⏭️  Sin cambios   : ${sinCambios}`);
-  console.log(`⚠️  No encontrados: ${noEncontrados}`);
-  console.log(`❌ Errores       : ${errores}`);
+  console.log(`✅ Actualizados   : ${actualizados}`);
+  console.log(`📦 Cambios stock  : ${cambiosStock}`);
+  console.log(`💰 Cambios precio : ${cambiosPrecio}`);
+  console.log(`⏭️  Sin cambios    : ${sinCambios}`);
+  console.log(`⚠️  No encontrados : ${noEncontrados}`);
+  console.log(`❌ Errores        : ${errores}`);
   console.log('══════════════════════════════════════\n');
 }
 
