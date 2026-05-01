@@ -63,7 +63,19 @@ async function ejecutarVenta(productos) {
         .find((b) => b.innerText?.trim() === "+ Nueva venta")
         ?.click();
     });
+// ── CÓDIGO DE CAJERO ─────────────────────────────────────────────────────
+    console.log("🔑 Esperando modal de código de cajero...");
+    await page.waitForSelector('input[placeholder="Código"]', { timeout: 10000 });
+    await page.type('input[placeholder="Código"]', "0305", { delay: 80 });
+    await page.keyboard.press("Enter");
+    console.log("✅ Código de cajero ingresado");
 
+    // Esperar que el modal cierre antes de buscar el iframe
+    await page.waitForFunction(
+      () => !document.querySelector('input[placeholder="Código"]'),
+      { timeout: 8000 }
+    ).catch(() => {});
+    await delay(800);
 
     // ── IFRAME ───────────────────────────────────────────────────────────────
     await page.waitForSelector('iframe[title="APIframe"]');
