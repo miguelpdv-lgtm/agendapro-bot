@@ -7,14 +7,37 @@ const puppeteer = require('puppeteer');
 const fs        = require('fs');
 const { createClient } = require('@supabase/supabase-js');
 
-const EMAIL                 = process.env.AGENDAPRO_EMAIL;
-const PASSWORD              = process.env.AGENDAPRO_PASSWORD;
-const SUPABASE_URL          = process.env.SUPABASE_URL;
+const EMAIL                     = process.env.AGENDAPRO_EMAIL;
+const PASSWORD                  = process.env.AGENDAPRO_PASSWORD;
+const SUPABASE_URL               = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const URL_INVENTARIO        = 'https://app.agendapro.com/products/inventory';
+const URL_INVENTARIO            = 'https://app.agendapro.com/products/inventory';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const delay    = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Helper: click al botón de login de forma resiliente ──────────────────────
+async function clickLoginButton(page) {
+  const clicked = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')];
+    const loginBtn = btns.find(b => {
+      const txt = b.textContent.trim().toLowerCase();
+      return txt.includes('ingresar') || txt.includes('login') ||
+             txt.includes('iniciar') || txt.includes('entrar') ||
+             txt.includes('sign in') || txt.includes('acceder');
+    });
+    if (loginBtn) { loginBtn.click(); return true; }
+    return false;
+  });
+
+  if (clicked) {
+    console.log('✅ Botón de login clickeado por texto');
+    return;
+  }
+
+  console.log('⚠️  Botón no encontrado por texto → usando Enter');
+  await page.keyboard.press('Enter');
+}
 
 async function extraerFilas(ctx) {
   return await ctx.evaluate(() => {
@@ -45,17 +68,17 @@ function toCSV(productos) {
   const headers = ['id','codigo','nombre','categoria','marca','formato','precio','stock'];
   const escape  = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows    = productos.map(p => headers.map(h => escape(p[h])).join(','));
-  return [headers.join(','), ...rows].join('\\n');
+  return [headers.join(','), ...rows].join('\n');
 }
 
 function limpiarStock(valor) {
   if (valor == null) return 0;
-  const limpio = String(valor).replace(/[^\\d-]/g, '');
+  const limpio = String(valor).replace(/[^\d-]/g, '');
   return limpio === '' ? 0 : Number(limpio);
 }
 
 async function actualizarStockEnSupabase(productos) {
-  console.log('\\n☁️  Sincronizando stock con Supabase...\\n');
+  console.log('\n☁️  Sincronizando stock con Supabase...\n');
 
   const { data: stockActual, error: errorLectura } = await supabase
     .from('products')
@@ -69,10 +92,9 @@ async function actualizarStockEnSupabase(productos) {
   const mapaStock = {};
   for (const row of stockActual) mapaStock[String(row.id)] = row.stock;
 
-  // Lista de IDs a ignorar (no generarán advertencia ni se actualizarán)
   const idsIgnorados = new Set([
-    '1156817', '1156822', '801850', '1153438', 
-    '1153445', '914694', '1156819' , '821517'
+    '1156817', '1156822', '801850', '1153438',
+    '1153445', '914694', '1156819', '821517'
   ]);
 
   let actualizados  = 0;
@@ -85,10 +107,7 @@ async function actualizarStockEnSupabase(productos) {
     const stock = limpiarStock(prod.stock);
     if (!id) continue;
 
-    // Si el ID está en la lista negra, lo saltamos silenciosamente
-    if (idsIgnorados.has(id)) {
-      continue;
-    }
+    if (idsIgnorados.has(id)) continue;
 
     if (!(id in mapaStock)) {
       console.warn(`⚠️  ID ${id} (${prod.nombre}) no está en Supabase`);
@@ -113,25 +132,31 @@ async function actualizarStockEnSupabase(productos) {
     actualizados++;
   }
 
-  console.log('\\n══════════════════════════════════════');
+  console.log('\n══════════════════════════════════════');
   console.log(`✅ Actualizados  : ${actualizados}`);
   console.log(`⏭️  Sin cambios   : ${sinCambios}`);
   console.log(`⚠️  No encontrados: ${noEncontrados}`);
   console.log(`❌ Errores       : ${errores}`);
-  console.log('══════════════════════════════════════\\n');
+  console.log('══════════════════════════════════════\n');
 }
 
-// Función principal exportada — la llama el scheduler en index.js
+// ── Función principal exportada ───────────────────────────────────────────────
 async function sincronizarInventario() {
-  console.log(`\\n🔄 [Inventario] Iniciando sincronización: ${new Date().toLocaleString()}`);
+  console.log(`\n🔄 [Inventario] Iniciando sincronización: ${new Date().toLocaleString()}`);
 
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--mute-audio',
     ],
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   });
@@ -139,17 +164,28 @@ async function sincronizarInventario() {
   const page = await browser.newPage();
   page.setDefaultTimeout(30000);
 
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+
   try {
     console.log('🔐 Login inventario...');
-    await page.goto('https://app.agendapro.com/login', { waitUntil: 'networkidle2' });
+    await page.goto('https://app.agendapro.com/login', { waitUntil: 'domcontentloaded' });
+
     await page.waitForSelector('input[placeholder="user@example.com"]');
-    await page.type('input[placeholder="user@example.com"]', EMAIL);
-    await page.type('input[placeholder="Enter your password"]', PASSWORD);
-    await page.click('button');
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+    await page.type('input[placeholder="user@example.com"]', EMAIL, { delay: 40 });
+    await page.type('input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
+
+    await clickLoginButton(page);
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
     console.log('✅ Login OK');
 
-    await page.goto(URL_INVENTARIO, { waitUntil: 'networkidle2' });
+    await page.goto(URL_INVENTARIO, { waitUntil: 'domcontentloaded' });
     await delay(2500);
 
     let ctx = page;
@@ -188,7 +224,6 @@ async function sincronizarInventario() {
       }
     }
 
-    // Guardar archivos locales (opcionales en Railway, útiles para debug)
     fs.writeFileSync('productos.json', JSON.stringify(todosLosProductos, null, 2), 'utf8');
     fs.writeFileSync('productos.csv',  toCSV(todosLosProductos), 'utf8');
     console.log(`💾 ${todosLosProductos.length} productos guardados`);
@@ -198,10 +233,11 @@ async function sincronizarInventario() {
 
   } catch (e) {
     console.error('❌ [Inventario] Error general:', e.message);
+    throw e;
   } finally {
-    await browser.close();
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
   }
 }
 
 module.exports = { sincronizarInventario };
-este es el inventario
