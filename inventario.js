@@ -9,7 +9,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const EMAIL                     = process.env.AGENDAPRO_EMAIL;
 const PASSWORD                  = process.env.AGENDAPRO_PASSWORD;
-const SUPABASE_URL               = process.env.SUPABASE_URL;
+const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const URL_INVENTARIO            = 'https://app.agendapro.com/products/inventory';
 
@@ -83,22 +83,22 @@ function limpiarStock(valor) {
 // ── Limpia el valor de precio a número flotante ───────────────────────────────
 function limpiarPrecio(valor) {
   if (valor == null || valor === '') return null;
-  // Elimina símbolo de moneda, espacios y separadores de miles; normaliza coma decimal
   const limpio = String(valor)
-    .replace(/[^0-9,.-]/g, '')   // quita $, letras, espacios, etc.
-    .replace(/\.(?=\d{3})/g, '') // quita puntos de miles (ej: 1.000 → 1000)
-    .replace(',', '.');          // normaliza coma decimal → punto
+    .replace(/[^0-9,.-]/g, '')   
+    .replace(/\.(?=\d{3})/g, '') 
+    .replace(',', '.');          
   const num = parseFloat(limpio);
   return isNaN(num) ? null : num;
 }
 
-// ── Sincroniza stock Y precio con Supabase ────────────────────────────────────
+// ── Sincroniza stock, precio Y nombre con Supabase ────────────────────────────
 async function actualizarStockEnSupabase(productos) {
-  console.log('\n☁️  Sincronizando stock y precios con Supabase...\n');
+  console.log('\n☁️  Sincronizando stock, precios y nombres con Supabase...\n');
 
+  // AGREGADO: Se consulta también la columna 'nombre'
   const { data: stockActual, error: errorLectura } = await supabase
     .from('products')
-    .select('id, stock, precio');
+    .select('id, stock, precio, nombre'); 
 
   if (errorLectura) {
     console.error('❌ No se pudo leer products:', errorLectura.message);
@@ -110,6 +110,7 @@ async function actualizarStockEnSupabase(productos) {
     mapaProductos[String(row.id)] = {
       stock:  row.stock,
       precio: row.precio,
+      nombre: row.nombre, // Guardamos el nombre actual
     };
   }
 
@@ -124,13 +125,15 @@ async function actualizarStockEnSupabase(productos) {
   let errores       = 0;
   let cambiosStock  = 0;
   let cambiosPrecio = 0;
+  let cambiosNombre = 0; // Nuevo contador
 
   for (const prod of productos) {
     const id     = String(prod.id || '').trim();
     const stock  = limpiarStock(prod.stock);
     const precio = limpiarPrecio(prod.precio);
+    const nombreNuevo = prod.nombre;
+    
     if (!id) continue;
-
     if (idsIgnorados.has(id)) continue;
 
     if (!(id in mapaProductos)) {
@@ -141,16 +144,19 @@ async function actualizarStockEnSupabase(productos) {
 
     const stockAnterior  = mapaProductos[id].stock;
     const precioAnterior = mapaProductos[id].precio;
+    const nombreAnterior = mapaProductos[id].nombre;
 
     const stockCambio  = stockAnterior !== stock;
     const precioCambio = precio !== null && precioAnterior !== precio;
+    // Comparamos que el nombre no esté vacío y sea diferente al de Supabase
+    const nombreCambio = nombreNuevo && nombreAnterior !== nombreNuevo; 
 
-    if (!stockCambio && !precioCambio) { sinCambios++; continue; }
+    if (!stockCambio && !precioCambio && !nombreCambio) { sinCambios++; continue; }
 
-    // Construir objeto de actualización solo con los campos que cambiaron
     const updates = {};
     if (stockCambio)  updates.stock  = stock;
     if (precioCambio) updates.precio = precio;
+    if (nombreCambio) updates.nombre = nombreNuevo;
 
     const { error } = await supabase
       .from('products')
@@ -171,6 +177,10 @@ async function actualizarStockEnSupabase(productos) {
       console.log(`💰 Precio ID ${id} | ${prod.nombre} → ${precioAnterior} → ${precio}`);
       cambiosPrecio++;
     }
+    if (nombreCambio) {
+      console.log(`📝 Nombre ID ${id} | ${nombreAnterior} → ${nombreNuevo}`);
+      cambiosNombre++;
+    }
 
     actualizados++;
   }
@@ -179,6 +189,7 @@ async function actualizarStockEnSupabase(productos) {
   console.log(`✅ Actualizados   : ${actualizados}`);
   console.log(`📦 Cambios stock  : ${cambiosStock}`);
   console.log(`💰 Cambios precio : ${cambiosPrecio}`);
+  console.log(`📝 Cambios nombre : ${cambiosNombre}`);
   console.log(`⏭️  Sin cambios    : ${sinCambios}`);
   console.log(`⚠️  No encontrados : ${noEncontrados}`);
   console.log(`❌ Errores        : ${errores}`);
@@ -187,7 +198,22 @@ async function actualizarStockEnSupabase(productos) {
 
 // ── Función principal exportada ───────────────────────────────────────────────
 async function sincronizarInventario() {
-  console.log(`\n🔄 [Inventario] Iniciando sincronización: ${new Date().toLocaleString()}`);
+  
+  // =====================================================================
+  // NUEVO: Validación de horario (Ejecutar por última vez a las 18:30)
+  // =====================================================================
+  const ahora = new Date();
+  const hora = ahora.getHours();
+  const minutos = ahora.getMinutes();
+
+  // Si la hora es mayor a 18 (19:00+) O si son las 18 y los minutos pasan de 30 (18:31+)
+  if (hora > 18 || (hora === 18 && minutos > 30)) {
+    console.log(`\n⏳ [Inventario] Omitido. Son las ${hora}:${minutos.toString().padStart(2, '0')} hrs. El script dejó de correr a las 18:30.`);
+    return; // Finalizamos ejecución tempranamente
+  }
+  // =====================================================================
+
+  console.log(`\n🔄 [Inventario] Iniciando sincronización: ${ahora.toLocaleString()}`);
 
   const browser = await puppeteer.launch({
     headless: true,
