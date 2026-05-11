@@ -512,38 +512,26 @@ async function ejecutarVenta(productos) {
             const drawer = document.querySelector('[data-testid="edit-item"]');
             if (!drawer) return false;
             const inputs = [...drawer.querySelectorAll("input")];
-            return inputs.some(
-              (inp) =>
-                inp.value === "0.0" ||
-                inp.value === "0" ||
-                inp
-                  .closest("div")
-                  ?.innerText?.toLowerCase()
-                  .includes("descuento")
-            );
+            return inputs.some((inp) => {
+              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
+              return ctx.includes("descuento");
+            });
           },
           { timeout: 10000 }
         );
 
         console.log(`✏️ Input de descuento encontrado para: ${prod.nombre}`);
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ESCRITURA DE DESCUENTO — versión corregida para input type="number"
-        // ═════════════════════════════════════════════════════════════════==
-
-        // 1) Asignar id temporal al input de descuento para poder seleccionarlo
+        // 1) Asignar id temporal al input de descuento
         const inputSelector = await frame.evaluate(() => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
+          if (!drawer) return null;
           const inputs = [...drawer.querySelectorAll("input")];
-          const discountInput =
-            inputs.find((inp) => {
-              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
-              return ctx.includes("descuento");
-            }) ??
-            inputs.find((inp) => inp.value === "0.0" || inp.value === "0");
-
+          const discountInput = inputs.find((inp) => {
+            const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
+            return ctx.includes("descuento");
+          });
           if (!discountInput) return null;
-
           discountInput.id = "temp-discount-input";
           return "#temp-discount-input";
         });
@@ -552,107 +540,44 @@ async function ejecutarVenta(productos) {
           throw new Error(`❌ No se encontró input de descuento para ${prod.nombre}`);
         }
 
-        // 2) Click para focus, seleccionar todo y borrar
-        await frame.click(inputSelector);
-        await delay(200);
+        // 2) Usar setter nativo para asignar valor
+        await frame.evaluate((pct) => {
+          const el = document.querySelector("#temp-discount-input");
+          if (!el) return;
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value"
+          ).set;
+          setter.call(el, String(pct));
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }, prod.discount_pct);
 
-        await page.keyboard.down("Control");
-        await page.keyboard.press("KeyA");
-        await page.keyboard.up("Control");
-        await page.keyboard.press("Backspace");
-        await delay(200);
-
-        // 3) Escribir el valor
-        await frame.type(inputSelector, String(prod.discount_pct), { delay: 80 });
         await delay(500);
 
-        // 4) Verificar que se escribió correctamente ANTES de Enter
-        const valorAntesEnter = await frame.evaluate(() => {
+        // 3) Verificar valor final
+        const valorFinal = await frame.evaluate(() => {
           const el = document.querySelector("#temp-discount-input");
           return el ? el.value : null;
         });
 
-        console.log(`🔍 Valor descuento ANTES de Enter: ${valorAntesEnter}`);
+        console.log(`🔍 Valor descuento aplicado: ${valorFinal}`);
 
-        if (valorAntesEnter !== String(prod.discount_pct)) {
-          console.log(`⚠️ frame.type no funcionó, usando setter nativo...`);
-          await frame.evaluate((pct) => {
-            const el = document.querySelector("#temp-discount-input");
-            if (!el) return;
-            const setter = Object.getOwnPropertyDescriptor(
-              window.HTMLInputElement.prototype,
-              "value"
-            ).set;
-            setter.call(el, String(pct));
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          }, prod.discount_pct);
-          await delay(500);
+        if (!valorFinal || valorFinal === "0" || valorFinal === "0.0") {
+          throw new Error(`❌ Descuento no aplicado en "${prod.nombre}"`);
         }
 
-        // 5) Enviar Enter DIRECTAMENTE al input vía JS
-        await frame.evaluate(() => {
-          const el = document.querySelector("#temp-discount-input");
-          if (!el) return;
-          el.focus();
-          ["keydown", "keypress", "keyup"].forEach((type) => {
-            el.dispatchEvent(
-              new KeyboardEvent(type, {
-                key: "Enter",
-                code: "Enter",
-                keyCode: 13,
-                which: 13,
-                bubbles: true,
-                cancelable: true,
-              })
-            );
-          });
-          el.blur();
-        });
-        await delay(1000);
+        console.log(`✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`);
 
-        // 6) Limpiar id temporal
+        // 4) Limpiar id temporal
         await frame.evaluate(() => {
           const el = document.querySelector("#temp-discount-input");
           if (el) el.removeAttribute("id");
         });
 
-        // 7) Verificar valor final
-        const valorFinal = await frame.evaluate(() => {
-          const drawer = document.querySelector('[data-testid="edit-item"]');
-          const inputs = [
-            ...(drawer
-              ? drawer.querySelectorAll("input")
-              : document.querySelectorAll("input")),
-          ];
-          const discountInput =
-            inputs.find((inp) => {
-              const ctx =
-                inp.closest("div")?.innerText?.toLowerCase() ?? "";
-              return ctx.includes("descuento");
-            }) ?? inputs.find((inp) => inp.type === "number");
-          return discountInput ? discountInput.value : null;
-        });
-
-        console.log(`🔍 Valor descuento DESPUÉS de Enter: ${valorFinal}`);
-
-        if (
-          valorFinal === "0" ||
-          valorFinal === "0.0" ||
-          valorFinal === null
-        ) {
-          throw new Error(
-            `❌ Descuento no aplicado en "${prod.nombre}". Valor: ${valorFinal}. Abortando.`
-          );
-        }
-
-        console.log(
-          `✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`
-        );
-
-        // ── Cerrar drawer con Escape ────────────────────────────────────────
+        // 5) Cerrar drawer
         await page.keyboard.press("Escape");
-        await delay(1000);
+        await delay(800);
       }
 
       console.log("\n✅ Todos los descuentos aplicados");
