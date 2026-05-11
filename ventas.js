@@ -150,8 +150,10 @@ async function ejecutarVenta(productos) {
 
     // ── LOOP PRODUCTOS ───────────────────────────────────────────────────────
     for (const prod of productos) {
-      console.log(`🛍️ Procesando: ${prod.nombre} x${prod.cantidad}` +
-        (prod.tiene_descuento ? ` | ${prod.discount_pct}% OFF` : ""));
+      console.log(
+        `🛍️ Procesando: ${prod.nombre} x${prod.cantidad}` +
+          (prod.tiene_descuento ? ` | ${prod.discount_pct}% OFF` : "")
+      );
 
       await frame.waitForSelector('input[type="text"]', { timeout: 10000 });
       await delay(400);
@@ -189,7 +191,7 @@ async function ejecutarVenta(productos) {
           ?.click();
       }, prod.nombre);
 
-      // ── PROFESIONAL ──────────────────────────────────────────────────────
+      // ── PROFESIONAL ────────────────────────────────────────────────────────
       await frame.waitForSelector(
         '[data-testid="associate-item-seller-select"]',
         { timeout: 8000 }
@@ -219,7 +221,7 @@ async function ejecutarVenta(productos) {
         .catch(() => {});
       await delay(300);
 
-      // ── CANTIDAD ─────────────────────────────────────────────────────────
+      // ── CANTIDAD ───────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         console.log("🔢 Ajustando cantidad...");
         for (let i = 1; i < prod.cantidad; i++) {
@@ -264,88 +266,106 @@ async function ejecutarVenta(productos) {
       console.log("🏷️ Aplicando descuentos en el carro...");
 
       for (const prod of productosConDescuento) {
-        console.log(`💸 Aplicando ${prod.discount_pct}% → ${prod.nombre}`);
+        console.log(`💸 Abriendo panel de: ${prod.nombre}`);
 
-        // Click en el producto dentro del carro para abrir el panel lateral
-        await frame.waitForFunction(
-          (nombre) =>
-            Array.from(document.querySelectorAll("span, p, div")).some((el) =>
-              el.innerText?.trim().startsWith(nombre)
-            ),
-          { timeout: 8000 },
-          prod.nombre
-        );
+        // Click en el ítem del carro — busca el elemento más específico
+        const clickeado = await frame.evaluate((nombre) => {
+          // Estrategia 1: data-testid con el nombre
+          const byTestId = document.querySelector(`[data-testid*="${nombre}"]`);
+          if (byTestId) { byTestId.click(); return "testid"; }
 
-        await frame.evaluate((nombre) => {
-          const el = Array.from(document.querySelectorAll("span, p, div")).find(
-            (el) => el.innerText?.trim().startsWith(nombre)
-          );
-          el?.closest("[class*='cart'], li, [data-testid]")?.click() ??
-            el?.click();
+          // Estrategia 2: buscar en <p> o <span> con texto exacto
+          const textos = [...document.querySelectorAll("p, span, strong")];
+          const el = textos.find((e) => e.innerText?.trim() === nombre);
+          if (el) {
+            const padre = el.closest(
+              "li, article, [role='button'], [class*='item'], [class*='product'], [class*='cart']"
+            );
+            if (padre) { padre.click(); return "padre"; }
+            el.click();
+            return "texto";
+          }
+          return null;
         }, prod.nombre);
 
-        await delay(800);
+        console.log(`🖱️ Click resultado: ${clickeado}`);
+        await delay(1000);
 
-        // Esperar el input de descuento
-        await frame.waitForFunction(
-          () => {
-            const inputs = Array.from(document.querySelectorAll("input"));
-            return inputs.some(
-              (inp) =>
-                inp.closest("label, div")?.innerText
-                  ?.toLowerCase()
-                  .includes("descuento") ||
-                inp.value === "0.0" ||
-                inp.value === "0"
-            );
-          },
-          { timeout: 8000 }
-        );
+        // Esperar que aparezca el input de descuento
+        try {
+          await frame.waitForFunction(
+            () => {
+              const inputs = [...document.querySelectorAll("input")];
+              return inputs.some(
+                (inp) =>
+                  inp.value === "0.0" ||
+                  inp.value === "0" ||
+                  inp.placeholder?.toLowerCase().includes("descuento") ||
+                  inp
+                    .closest("div, label, section")
+                    ?.innerText?.toLowerCase()
+                    .includes("descuento")
+              );
+            },
+            { timeout: 6000 }
+          );
+        } catch {
+          console.warn(
+            `⚠️ Input de descuento no apareció para ${prod.nombre}, saltando...`
+          );
+          continue;
+        }
 
-        // Limpiar y escribir el descuento usando setter nativo de React
+        // Triple-click + setter nativo React
         await frame.evaluate((pct) => {
-          const inputs = Array.from(document.querySelectorAll("input"));
+          const inputs = [...document.querySelectorAll("input")];
+
           const discountInput =
             inputs.find((inp) => {
-              const label =
-                inp.closest("label, div, section")?.innerText?.toLowerCase() ??
+              const ctx =
+                inp.closest("div, label, section")?.innerText?.toLowerCase() ??
                 "";
-              return label.includes("descuento");
+              return ctx.includes("descuento");
             }) ??
-            inputs.find(
-              (inp) => inp.value === "0.0" || inp.value === "0"
-            );
+            inputs.find((inp) => inp.value === "0.0" || inp.value === "0");
 
           if (!discountInput) return;
 
-          discountInput.focus();
+          discountInput.dispatchEvent(
+            new MouseEvent("click", { bubbles: true, detail: 3 })
+          );
           discountInput.select();
 
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          const setter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype,
             "value"
           ).set;
-          nativeInputValueSetter.call(discountInput, String(pct));
-          discountInput.dispatchEvent(new Event("input", { bubbles: true }));
+          setter.call(discountInput, String(pct));
+
+          discountInput.dispatchEvent(new Event("input",  { bubbles: true }));
           discountInput.dispatchEvent(new Event("change", { bubbles: true }));
         }, prod.discount_pct);
 
         await delay(300);
         await frame.keyboard.press("Enter");
-        await delay(600);
+        await delay(800);
 
-        console.log(`✅ Descuento aplicado: ${prod.nombre} → ${prod.discount_pct}%`);
+        console.log(`✅ Descuento ${prod.discount_pct}% aplicado: ${prod.nombre}`);
 
-        // Cerrar panel lateral (botón ← atrás)
+        // Volver atrás
         await frame.evaluate(() => {
-          const backBtn = document.querySelector(
-            '[data-testid="back-button"], button[aria-label="back"]'
-          );
-          if (backBtn) {
-            (backBtn.closest("button") ?? backBtn)?.click();
-          }
+          const back = document.querySelector('[data-testid="back-button"]');
+          if (back) { back.click(); return; }
+
+          const btns = [...document.querySelectorAll("button")];
+          const backBtn = btns.find((b) => {
+            const txt = b.innerText?.trim();
+            return txt === "" || txt === "<" || txt === "‹" || b.querySelector("svg");
+          });
+          backBtn?.click();
         });
-        await delay(500);
+
+        await delay(600);
       }
 
       console.log("✅ Todos los descuentos aplicados");
@@ -363,7 +383,7 @@ async function ejecutarVenta(productos) {
         ?.click();
     });
 
-    // ── CONTINUAR ───────────────────────────────────────────────────────────
+    // ── CONTINUAR ────────────────────────────────────────────────────────────
     await delay(3000);
     console.log("➡️ Click en Continuar...");
 
@@ -385,7 +405,7 @@ async function ejecutarVenta(productos) {
 
     console.log("✅ Continuar clickeado");
 
-    // ── MÉTODO DE PAGO ──────────────────────────────────────────────────────
+    // ── MÉTODO DE PAGO ────────────────────────────────────────────────────────
     await delay(3000);
     console.log("➡️ Esperando panel de método de pago...");
 
