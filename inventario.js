@@ -6,6 +6,7 @@ require('dotenv').config();
 const puppeteer = require('puppeteer');
 const fs        = require('fs');
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 
 const EMAIL                     = process.env.AGENDAPRO_EMAIL;
 const PASSWORD                  = process.env.AGENDAPRO_PASSWORD;
@@ -13,7 +14,9 @@ const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const URL_INVENTARIO            = 'https://app.agendapro.com/products/inventory';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  realtime: { transport: ws },
+});
 const delay    = ms => new Promise(r => setTimeout(r, ms));
 
 // ── Helper: click al botón de login de forma resiliente ──────────────────────
