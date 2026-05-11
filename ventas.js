@@ -383,36 +383,34 @@ async function ejecutarVenta(productos) {
         );
 
         // ── CLICK PRODUCTO CARRITO ────────────────────────────────────────
-        const abierto =
-          await frame.evaluate((nombre) => {
-            const product = [
-              ...document.querySelectorAll(
-                '[data-testid^="product-"]'
-              ),
-            ].find((el) => {
-              const testid =
-                el.getAttribute(
-                  "data-testid"
-                ) || "";
+const abierto =
+  await frame.evaluate((nombre) => {
 
-              return testid
-                .toLowerCase()
-                .startsWith(
-                  `product-${nombre.toLowerCase()}`
-                );
-            });
+    const product = [
+      ...document.querySelectorAll(
+        '[data-testid^="product-"]'
+      ),
+    ].find((el) => {
 
-            if (!product) return false;
+      const testid =
+        el.getAttribute("data-testid") || "";
 
-            product.scrollIntoView({
-              block: "center",
-            });
+      return testid.includes(
+        `product-${nombre}-`
+      );
+    });
 
-            product.click();
+    if (!product) return false;
 
-            return true;
-          }, prod.nombre);
+    product.scrollIntoView({
+      block: "center",
+    });
 
+    product.click();
+
+    return true;
+
+  }, prod.nombre);
         if (!abierto) {
           throw new Error(
             `❌ No se encontró ${prod.nombre}`
