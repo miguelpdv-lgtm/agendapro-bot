@@ -327,6 +327,37 @@ async function ejecutarVenta(productos) {
 
         console.log("✅ Card clickeada");
 
+
+await delay(2000); // dar tiempo al drawer
+
+// DEBUG: buscar el input en AMBOS contextos
+const enFrame = await frame.evaluate(() =>
+  !!document.querySelector('input[data-testid$="unitDiscount"]')
+);
+const enPage = await page.evaluate(() =>
+  !!document.querySelector('input[data-testid$="unitDiscount"]')
+);
+const todosInputsFrame = await frame.evaluate(() =>
+  [...document.querySelectorAll("input")].map((i) => ({
+    testid: i.dataset.testid,
+    name: i.name,
+    type: i.type,
+    value: i.value,
+  }))
+);
+const todosInputsPage = await page.evaluate(() =>
+  [...document.querySelectorAll("input")].map((i) => ({
+    testid: i.dataset.testid,
+    name: i.name,
+    type: i.type,
+    value: i.value,
+  }))
+);
+
+console.log("🔍 Input en frame:", enFrame);
+console.log("🔍 Input en page:", enPage);
+console.log("🔍 Inputs frame:", JSON.stringify(todosInputsFrame, null, 2));
+console.log("🔍 Inputs page:", JSON.stringify(todosInputsPage, null, 2));
         // ───────────────────────────────────────────────────────────────────
         // ESPERAR INPUT DE DESCUENTO
         // ───────────────────────────────────────────────────────────────────
