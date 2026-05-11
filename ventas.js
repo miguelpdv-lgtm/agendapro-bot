@@ -458,64 +458,86 @@ async function ejecutarVenta(productos) {
         );
 
         // ───────────────────────────────────────────────────────────────
-        // ABRIR PRODUCTO CARRITO
-        // ───────────────────────────────────────────────────────────────
-        const abierto =
-          await frame.evaluate(
-            (nombre) => {
-              const product = [
-                ...document.querySelectorAll(
-                  '[data-testid^="product-"]'
-                ),
-              ].find((el) => {
-                const testid =
-                  el.getAttribute(
-                    "data-testid"
-                  ) || "";
+// ABRIR PRODUCTO DEL CARRITO
+// ───────────────────────────────────────────────────────────────
+const abierto = await frame.evaluate((nombre) => {
 
-                return testid.includes(
-                  `product-${nombre}-`
-                );
-              });
+  const product = [
+    ...document.querySelectorAll(
+      '[data-testid^="product-"]'
+    ),
+  ].find((el) => {
 
-              if (!product)
-                return false;
+    const testid =
+      el.getAttribute("data-testid") || "";
 
-              product.scrollIntoView(
-                {
-                  block: "center",
-                }
-              );
+    return testid.includes(
+      `product-${nombre}-`
+    );
+  });
 
-              product.click();
+  if (!product) return false;
 
-              return true;
-            },
-            prod.nombre
-          );
+  product.scrollIntoView({
+    block: "center",
+  });
 
-        if (!abierto) {
-          throw new Error(
-            `❌ No se encontró ${prod.nombre}`
-          );
-        }
+  // CLICK REAL SOBRE LA CARD
+  product.dispatchEvent(
+    new MouseEvent("mousedown", {
+      bubbles: true,
+    })
+  );
 
-        console.log(
-          `✅ Drawer abierto`
-        );
+  product.dispatchEvent(
+    new MouseEvent("mouseup", {
+      bubbles: true,
+    })
+  );
 
-        await delay(1200);
+  product.dispatchEvent(
+    new MouseEvent("click", {
+      bubbles: true,
+    })
+  );
 
-        // ───────────────────────────────────────────────────────────────
-        // ESPERAR DRAWER
-        // ───────────────────────────────────────────────────────────────
-        await frame.waitForSelector(
-          '[data-testid="edit-item"]',
-          {
-            timeout: 10000,
-          }
-        );
+  return true;
 
+}, prod.nombre);
+
+if (!abierto) {
+  throw new Error(
+    `❌ No se encontró ${prod.nombre}`
+  );
+}
+
+console.log("✅ Card clickeada");
+
+await delay(1500);
+
+// ───────────────────────────────────────────────────────────────
+// ESPERAR DRAWER REAL
+// ───────────────────────────────────────────────────────────────
+await frame.waitForFunction(() => {
+
+  // AgendaPro usa drawer/dialog dinámico
+  const dialogs = [
+    ...document.querySelectorAll(
+      '[role="dialog"]'
+    ),
+  ];
+
+  return dialogs.some((d) =>
+    d.innerText
+      ?.toLowerCase()
+      .includes("descuento")
+  );
+
+}, {
+  timeout: 15000,
+});
+
+console.log("✅ Drawer detectado");
         // ───────────────────────────────────────────────────────────────
         // INPUT DESCUENTO
         // ───────────────────────────────────────────────────────────────
