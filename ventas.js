@@ -301,26 +301,28 @@ async function ejecutarVenta(productos) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
 
         // ───────────────────────────────────────────────────────────────────
-        // ABRIR PRODUCTO DEL CARRITO
-        // data-testid real confirmado: "edit-product-${nombre}"
+        // ABRIR DRAWER — click nativo DOM dentro del evaluate
+        // (CDP click no dispara los handlers de React en este iframe)
         // ───────────────────────────────────────────────────────────────────
-        const btnSelector = `[data-testid="edit-product-${prod.nombre}"]`;
-
-        await frame.waitForSelector(btnSelector, { timeout: 10000 });
-
-        const btnHandle = await frame.$(btnSelector);
-
-        await btnHandle.evaluate((el) =>
-          el.scrollIntoView({ block: "center" })
+        await frame.waitForSelector(
+          `[data-testid="edit-product-${prod.nombre}"]`,
+          { timeout: 10000 }
         );
-        await delay(300);
-        await btnHandle.click();
+
+        await frame.evaluate((nombre) => {
+          const btn = document.querySelector(
+            `[data-testid="edit-product-${nombre}"]`
+          );
+          if (!btn) return;
+          btn.scrollIntoView({ block: "center" });
+          btn.focus();
+          btn.click(); // click() nativo del DOM — dispara React handlers
+        }, prod.nombre);
 
         console.log("✅ Card clickeada");
 
         // ───────────────────────────────────────────────────────────────────
         // ESPERAR INPUT DE DESCUENTO
-        // data-testid real: "items.X.unitDiscount"
         // ───────────────────────────────────────────────────────────────────
         console.log("⏳ Esperando input de descuento...");
 
@@ -333,7 +335,7 @@ async function ejecutarVenta(productos) {
         console.log("✅ Input descuento encontrado");
 
         // ───────────────────────────────────────────────────────────────────
-        // SETEAR DESCUENTO (React-compatible native setter)
+        // SETEAR DESCUENTO (React controlled input — native setter)
         // ───────────────────────────────────────────────────────────────────
         console.log(`✏️ Aplicando ${prod.discount_pct}%`);
 
@@ -358,7 +360,21 @@ async function ejecutarVenta(productos) {
         }, prod.discount_pct);
 
         await delay(500);
-        await page.keyboard.press("Enter");
+
+        // Presionar Enter dentro del frame para confirmar
+        await frame.evaluate(() => {
+          const el = document.querySelector(
+            'input[data-testid$="unitDiscount"]'
+          );
+          if (!el) return;
+          el.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+          );
+          el.dispatchEvent(
+            new KeyboardEvent("keyup", { key: "Enter", bubbles: true })
+          );
+        });
+
         await delay(800);
 
         // ───────────────────────────────────────────────────────────────────
@@ -382,9 +398,25 @@ async function ejecutarVenta(productos) {
         console.log("✅ Descuento confirmado");
 
         // ───────────────────────────────────────────────────────────────────
-        // CERRAR DRAWER
+        // CERRAR DRAWER — buscar botón guardar o presionar Escape
         // ───────────────────────────────────────────────────────────────────
-        await page.keyboard.press("Escape");
+        const cerrado = await frame.evaluate(() => {
+          const guardar = Array.from(
+            document.querySelectorAll("button")
+          ).find((b) =>
+            b.innerText?.toLowerCase().includes("guardar")
+          );
+          if (guardar) {
+            guardar.click();
+            return "guardar";
+          }
+          return null;
+        });
+
+        if (!cerrado) {
+          await page.keyboard.press("Escape");
+        }
+
         await delay(1000);
       }
 
