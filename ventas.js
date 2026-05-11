@@ -527,45 +527,124 @@ async function ejecutarVenta(productos) {
 
         console.log(`✏️ Input de descuento encontrado para: ${prod.nombre}`);
 
-        // ── Limpiar y escribir descuento ────────────────────────────────────
-        await frame.evaluate((pct) => {
+        // ═══════════════════════════════════════════════════════════════════
+        // NUEVA ESTRATEGIA DE ESCRITURA DE DESCUENTO
+        // ═══════════════════════════════════════════════════════════════════
+        
+        // 1) Encontrar el input de descuento y hacerle focus
+        const discountInputHandle = await frame.evaluateHandle(() => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
-          const inputs = [
-            ...(drawer
-              ? drawer.querySelectorAll("input")
-              : document.querySelectorAll("input")),
-          ];
+          const inputs = [...drawer.querySelectorAll("input")];
+          return (
+            inputs.find((inp) => {
+              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
+              return ctx.includes("descuento");
+            }) ??
+            inputs.find((inp) => inp.value === "0.0" || inp.value === "0")
+          );
+        });
 
+        if (!discountInputHandle) {
+          throw new Error(`❌ No se pudo obtener handle del input de descuento para ${prod.nombre}`);
+        }
+
+        // 2) Focus, seleccionar todo, y limpiar
+        await discountInputHandle.evaluate((el) => {
+          el.focus();
+          el.select();
+          el.setSelectionRange(0, el.value.length);
+        });
+        await delay(200);
+
+        // 3) Escribir el valor caracter por caracter con frame.type()
+        // Primero necesitamos un selector único para este input
+        const inputSelector = await frame.evaluate(() => {
+          const drawer = document.querySelector('[data-testid="edit-item"]');
+          const inputs = [...drawer.querySelectorAll("input")];
           const discountInput =
             inputs.find((inp) => {
-              const ctx =
-                inp.closest("div")?.innerText?.toLowerCase() ?? "";
+              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
               return ctx.includes("descuento");
             }) ??
             inputs.find((inp) => inp.value === "0.0" || inp.value === "0");
+          
+          if (!discountInput) return null;
+          
+          // Añadir un id temporal para poder seleccionarlo
+          discountInput.id = "temp-discount-input";
+          return "#temp-discount-input";
+        });
 
-          if (!discountInput) return;
+        if (!inputSelector) {
+          throw new Error(`❌ No se pudo crear selector para input de descuento`);
+        }
 
-          discountInput.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, detail: 3 })
-          );
-          discountInput.select();
+        // Limpiar y escribir
+        await page.keyboard.down("Control");
+        await page.keyboard.press("KeyA");
+        await page.keyboard.up("Control");
+        await page.keyboard.press("Backspace");
+        await delay(200);
 
-          const setter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype,
-            "value"
-          ).set;
-          setter.call(discountInput, String(pct));
+        await frame.type(inputSelector, String(prod.discount_pct), { delay: 80 });
+        await delay(500);
 
-          discountInput.dispatchEvent(new Event("input", { bubbles: true }));
-          discountInput.dispatchEvent(new Event("change", { bubbles: true }));
-        }, prod.discount_pct);
+        // 4) Verificar que se escribió correctamente ANTES de Enter
+        const valorAntesEnter = await frame.evaluate(() => {
+          const el = document.querySelector("#temp-discount-input");
+          return el ? el.value : null;
+        });
 
-        await delay(300);
-        await page.keyboard.press("Enter");
-        await delay(800);
+        console.log(`🔍 Valor descuento ANTES de Enter: ${valorAntesEnter}`);
 
-        // ── Verificar que el valor cambió ───────────────────────────────────
+        if (valorAntesEnter !== String(prod.discount_pct)) {
+          // Fallback: usar el setter nativo si frame.type no funcionó
+          console.log(`⚠️ frame.type no funcionó, usando setter nativo...`);
+          await frame.evaluate((pct) => {
+            const el = document.querySelector("#temp-discount-input");
+            if (!el) return;
+            const setter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              "value"
+            ).set;
+            setter.call(el, String(pct));
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            el.dispatchEvent(new Event("blur", { bubbles: true }));
+          }, prod.discount_pct);
+          await delay(500);
+        }
+
+        // 5) Enviar Enter DIRECTAMENTE al input vía JS (más confiable que page.keyboard)
+        await frame.evaluate(() => {
+          const el = document.querySelector("#temp-discount-input");
+          if (!el) return;
+          el.focus();
+          // Simular keydown + keyup + keypress de Enter
+          ["keydown", "keypress", "keyup"].forEach((type) => {
+            el.dispatchEvent(
+              new KeyboardEvent(type, {
+                key: "Enter",
+                code: "Enter",
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true,
+              })
+            );
+          });
+          // También blur para que React guarde
+          el.blur();
+        });
+        await delay(1000);
+
+        // 6) Limpiar id temporal
+        await frame.evaluate(() => {
+          const el = document.querySelector("#temp-discount-input");
+          if (el) el.removeAttribute("id");
+        });
+
+        // 7) Verificar valor final
         const valorFinal = await frame.evaluate(() => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
           const inputs = [
@@ -582,7 +661,7 @@ async function ejecutarVenta(productos) {
           return discountInput ? discountInput.value : null;
         });
 
-        console.log(`🔍 Valor descuento después de Enter: ${valorFinal}`);
+        console.log(`🔍 Valor descuento DESPUÉS de Enter: ${valorFinal}`);
 
         if (
           valorFinal === "0" ||
