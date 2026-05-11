@@ -63,7 +63,6 @@ async function cerrarDrawer(frame) {
   await frame.keyboard.press("Escape");
   await delay(600);
 
-  // Esperar a que desaparezca o cambie a closed
   await frame
     .waitForFunction(
       () => {
@@ -73,10 +72,80 @@ async function cerrarDrawer(frame) {
       { timeout: 5000 }
     )
     .catch(() => {
-      console.log("⚠️ Drawer no respondió al Escape, forzando click fuera...");
+      console.log("⚠️ Drawer no cerró con Escape, intentando click fuera...");
     });
 
   await delay(400);
+}
+
+// ── Helper: click robusto en elemento del iframe ─────────────────────────────
+async function clickRobusto(frame, selector, nombreProducto) {
+  console.log(`🎯 Buscando selector: ${selector}`);
+
+  // 1) Esperar a que exista
+  await frame.waitForSelector(selector, { timeout: 8000 });
+
+  // 2) Obtener ElementHandle y hacer click nativo de Puppeteer
+  const el = await frame.$(selector);
+  if (!el) {
+    throw new Error(`❌ No se encontró el elemento para "${nombreProducto}"`);
+  }
+
+  // Scroll asegurado
+  await el.evaluate((node) =>
+    node.scrollIntoView({ block: "center", behavior: "instant" })
+  );
+  await delay(400);
+
+  console.log(`🖱️ Click nativo en "${nombreProducto}"...`);
+  try {
+    await el.click({ delay: 50 });
+  } catch (e) {
+    console.log(`⚠️ Click nativo falló: ${e.message}`);
+  }
+
+  await delay(600);
+
+  // 3) Verificar si el drawer se abrió
+  const drawerAbierto = await frame.evaluate(() => {
+    const drawer = document.querySelector('[data-testid="edit-item"]');
+    return drawer && drawer.getAttribute("data-state") === "open";
+  });
+
+  if (drawerAbierto) {
+    console.log(`✅ Drawer abierto con click nativo`);
+    return;
+  }
+
+  // 4) Si no se abrió, forzar evento JS click
+  console.log(`🔄 Forzando evento JS click en "${nombreProducto}"...`);
+  await el.evaluate((node) => {
+    const events = ["mousedown", "mouseup", "click"];
+    events.forEach((type) => {
+      const evt = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      });
+      node.dispatchEvent(evt);
+    });
+  });
+
+  await delay(800);
+
+  // 5) Última verificación
+  const drawerAbierto2 = await frame.evaluate(() => {
+    const drawer = document.querySelector('[data-testid="edit-item"]');
+    return drawer && drawer.getAttribute("data-state") === "open";
+  });
+
+  if (!drawerAbierto2) {
+    throw new Error(
+      `❌ No se pudo abrir el drawer de "${nombreProducto}" después de 2 intentos.`
+    );
+  }
+
+  console.log(`✅ Drawer abierto con evento JS`);
 }
 
 async function ejecutarVenta(productos) {
@@ -300,7 +369,7 @@ async function ejecutarVenta(productos) {
     });
 
     console.log("🛒 Carrito abierto");
-    await delay(2500);
+    await delay(3000);
 
     // ── APLICAR DESCUENTOS EN EL CARRO ──────────────────────────────────────
     const productosConDescuento = productos.filter(
@@ -311,79 +380,43 @@ async function ejecutarVenta(productos) {
       console.log("🏷️ Aplicando descuentos en el carro...");
 
       // Al entrar al carrito, el drawer del último producto puede venir abierto.
-      // Lo cerramos antes de empezar.
       await cerrarDrawer(frame);
 
       for (const prod of productosConDescuento) {
         console.log(`💸 Procesando descuento de: ${prod.nombre}`);
 
-        // Verificar si el drawer ya está abierto para este producto
-        const drawerYaAbierto = await frame.evaluate((nombre) => {
-          const drawer = document.querySelector('[data-testid="edit-item"]');
-          if (!drawer || drawer.getAttribute("data-state") !== "open")
-            return false;
-          return drawer.innerText.includes(nombre);
-        }, prod.nombre);
+        // Buscar el producto en el carrito por data-cy o data-testid
+        let selector = `[data-cy="${prod.nombre}"]`;
+        let existe = await frame.evaluate(
+          (sel) => !!document.querySelector(sel),
+          selector
+        );
 
-        if (!drawerYaAbierto) {
-          // Cerrar cualquier drawer que pudiera estar abierto de otra cosa
-          await cerrarDrawer(frame);
+        if (!existe) {
+          // Fallback: buscar data-testid que contenga el nombre
+          selector = await frame.evaluate((nombre) => {
+            const items = [...document.querySelectorAll("[data-testid]")];
+            const match = items.find((el) =>
+              el
+                .getAttribute("data-testid")
+                ?.toLowerCase()
+                .includes(nombre.toLowerCase())
+            );
+            return match
+              ? `[data-testid="${match.getAttribute("data-testid")}"]`
+              : null;
+          }, prod.nombre);
 
-          // Buscar el producto en el carrito y hacer click REAL
-          const productSelector = `[data-cy="${prod.nombre}"]`;
-          const existeEnCarro = await frame.evaluate(
-            (sel) => !!document.querySelector(sel),
-            productSelector
-          );
-
-          if (!existeEnCarro) {
-            // Fallback: buscar por data-testid que contenga el nombre
-            const fallbackSelector = await frame.evaluate((nombre) => {
-              const items = [...document.querySelectorAll("[data-testid]")];
-              const match = items.find((el) =>
-                el
-                  .getAttribute("data-testid")
-                  ?.toLowerCase()
-                  .includes(nombre.toLowerCase())
-              );
-              return match ? `[data-testid="${match.getAttribute("data-testid")}"]` : null;
-            }, prod.nombre);
-
-            if (!fallbackSelector) {
-              throw new Error(
-                `❌ No se encontró "${prod.nombre}" en el carrito. Abortando venta.`
-              );
-            }
-            console.log(`🔎 Fallback selector: ${fallbackSelector}`);
-            await frame.waitForSelector(fallbackSelector, { timeout: 8000 });
-            await frame.evaluate((sel) => {
-              document.querySelector(sel)?.scrollIntoView({ block: "center", behavior: "instant" });
-            }, fallbackSelector);
-            await delay(300);
-            await frame.click(fallbackSelector);
-          } else {
-            await frame.waitForSelector(productSelector, { timeout: 8000 });
-            await frame.evaluate((sel) => {
-              document.querySelector(sel)?.scrollIntoView({ block: "center", behavior: "instant" });
-            }, productSelector);
-            await delay(300);
-            await frame.click(productSelector);
+          if (!selector) {
+            throw new Error(
+              `❌ No se encontró "${prod.nombre}" en el carrito. Abortando venta.`
+            );
           }
-
-          console.log(`🖱️ Click en producto del carro OK`);
-
-          // Esperar a que el drawer se abra (data-state="open")
-          await frame.waitForFunction(
-            () => {
-              const drawer = document.querySelector('[data-testid="edit-item"]');
-              return drawer && drawer.getAttribute("data-state") === "open";
-            },
-            { timeout: 10000 }
-          );
-          console.log(`✏️ Panel edit-item abierto para: ${prod.nombre}`);
-        } else {
-          console.log(`✏️ Drawer ya estaba abierto para: ${prod.nombre}`);
+          console.log(`🔎 Fallback selector: ${selector}`);
         }
+
+        // Click robusto que reintenta si el drawer no se abre
+        await clickRobusto(frame, selector, prod.nombre);
 
         // ── Esperar input de descuento dentro del drawer ─────────────────────
         await frame.waitForFunction(
@@ -477,7 +510,7 @@ async function ejecutarVenta(productos) {
           `✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`
         );
 
-        // ── Cerrar drawer con Escape (el botón de cerrar tiene am-hidden) ───
+        // ── Cerrar drawer con Escape ────────────────────────────────────────
         await frame.keyboard.press("Escape");
         await delay(800);
       }
