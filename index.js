@@ -2,8 +2,18 @@
 //  index.js — Servidor Express + Cola de ventas + Scheduler de inventario
 // ─────────────────────────────────────────────────────────────────────────────
 require('dotenv').config();
+
+// ── GUARDAS GLOBALES — evitan que el proceso muera por errores de Puppeteer ──
+process.on('uncaughtException', (err) => {
+  console.error('💥 [UNCAUGHT EXCEPTION] El proceso no morirá:', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 [UNHANDLED REJECTION] El proceso no morirá:', reason?.message ?? reason);
+});
+
 const express = require('express');
-const cron    = require('node-cron'); // Importamos node-cron
+const cron    = require('node-cron');
 const cola    = require('./cola');
 const { sincronizarInventario } = require('./inventario');
 
@@ -103,20 +113,17 @@ async function tickInventario() {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`\n🚀 AgendaPro Bot corriendo en puerto ${PORT}`);
-  
-  // Sincronización inicial al arrancar (solo si está en horario permitido)
-  // O puedes dejarla siempre activa para validar conexión al encender el server:
+
   console.log('⏰ [Scheduler] Ejecutando sincronización inicial de arranque...');
   await tickInventario();
 
-  // PROGRAMACIÓN CRON: Cada 15 min, de 6am a 5:59pm, Hora Colombia
-  // Expresión: */15 (cada 15 min) | 6-17 (horas 6,7...17) | * * * (diario)
+  // Cada 15 min, de 6am a 5:59pm, Hora Colombia
   cron.schedule('*/15 6-17 * * *', async () => {
     console.log('🔔 [Cron] Ejecutando sincronización programada (Horario 6AM-6PM)');
     await tickInventario();
   }, {
     scheduled: true,
-    timezone: "America/Bogota"
+    timezone: 'America/Bogota',
   });
 
   console.log('⏰ [Scheduler] Cron configurado: 6:00 AM a 6:00 PM (Hora Colombia)');
