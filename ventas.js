@@ -69,6 +69,7 @@ async function obtenerDescuentos(productos) {
 // VENTA
 // ─────────────────────────────────────────────────────────────────────────────
 async function ejecutarVenta(productos) {
+
   productos =
     await obtenerDescuentos(productos);
 
@@ -95,6 +96,7 @@ async function ejecutarVenta(productos) {
   page.setDefaultTimeout(30000);
 
   try {
+
     // ───────────────────────────────────────────────────────────────────────
     // LOGIN
     // ───────────────────────────────────────────────────────────────────────
@@ -155,6 +157,7 @@ async function ejecutarVenta(productos) {
     );
 
     await page.evaluate(() => {
+
       Array.from(
         document.querySelectorAll("button")
       )
@@ -164,10 +167,11 @@ async function ejecutarVenta(productos) {
             "+ Nueva venta"
         )
         ?.click();
+
     });
 
     // ───────────────────────────────────────────────────────────────────────
-    // CÓDIGO
+    // CÓDIGO CAJERO
     // ───────────────────────────────────────────────────────────────────────
     await page.waitForSelector(
       'input[placeholder="Código"]'
@@ -222,6 +226,7 @@ async function ejecutarVenta(productos) {
     );
 
     await frame.evaluate(() => {
+
       Array.from(
         document.querySelectorAll("button")
       )
@@ -233,6 +238,7 @@ async function ejecutarVenta(productos) {
             )
         )
         ?.click();
+
     });
 
     await delay(1500);
@@ -241,6 +247,7 @@ async function ejecutarVenta(productos) {
     // PRODUCTOS
     // ───────────────────────────────────────────────────────────────────────
     for (const prod of productos) {
+
       console.log(
         `🛍️ ${prod.nombre} x${prod.cantidad}`
       );
@@ -250,6 +257,7 @@ async function ejecutarVenta(productos) {
       );
 
       await frame.evaluate(() => {
+
         const input =
           document.querySelector(
             'input[type="text"]'
@@ -259,6 +267,7 @@ async function ejecutarVenta(productos) {
 
         input.focus();
         input.select();
+
       });
 
       await delay(300);
@@ -305,11 +314,13 @@ async function ejecutarVenta(productos) {
       );
 
       await frame.evaluate((nombre) => {
+
         document
           .querySelector(
             `[data-testid="${nombre}-show-counter"]`
           )
           ?.click();
+
       }, prod.nombre);
 
       // ───────────────────────────────────────────────────────────────────
@@ -320,11 +331,13 @@ async function ejecutarVenta(productos) {
       );
 
       await frame.evaluate(() => {
+
         document
           .querySelector(
             '[data-testid="associate-item-seller-select"]'
           )
           ?.click();
+
       });
 
       await frame.waitForFunction(() =>
@@ -340,6 +353,7 @@ async function ejecutarVenta(productos) {
       );
 
       await frame.evaluate(() => {
+
         Array.from(
           document.querySelectorAll(
             '[role="option"]'
@@ -351,6 +365,7 @@ async function ejecutarVenta(productos) {
               .includes("ema")
           )
           ?.click();
+
       });
 
       await delay(500);
@@ -359,18 +374,22 @@ async function ejecutarVenta(productos) {
       // CANTIDAD
       // ───────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
+
         for (
           let i = 1;
           i < prod.cantidad;
           i++
         ) {
+
           await frame.evaluate(
             (nombre) => {
+
               document
                 .querySelector(
                   `[data-testid="${nombre}-show-counter"]`
                 )
                 ?.click();
+
             },
             prod.nombre
           );
@@ -381,11 +400,13 @@ async function ejecutarVenta(productos) {
 
           await frame.evaluate(
             (nombre) => {
+
               document
                 .querySelector(
                   `[data-testid="${nombre}-add"]`
                 )
                 ?.click();
+
             },
             prod.nombre
           );
@@ -405,15 +426,17 @@ async function ejecutarVenta(productos) {
     console.log("🛒 Ir al carrito...");
 
     await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some(
-        (b) =>
-          b.innerText
-            ?.toLowerCase()
-            .includes("ir al carro")
+      Array.from(
+        document.querySelectorAll("button")
+      ).some((b) =>
+        b.innerText
+          ?.toLowerCase()
+          .includes("ir al carro")
       )
     );
 
     await frame.evaluate(() => {
+
       const btn = Array.from(
         document.querySelectorAll("button")
       ).find((b) =>
@@ -422,18 +445,21 @@ async function ejecutarVenta(productos) {
           .includes("ir al carro")
       );
 
-      if (btn) {
-        btn.scrollIntoView({
-          block: "center",
-        });
+      if (!btn) return;
 
-        btn.click();
-      }
+      btn.scrollIntoView({
+        block: "center",
+      });
+
+      btn.click();
+
     });
 
     await delay(2500);
 
-    console.log("✅ Dentro del carrito");
+    console.log(
+      "✅ Dentro del carrito"
+    );
 
     // ───────────────────────────────────────────────────────────────────────
     // DESCUENTOS
@@ -448,148 +474,122 @@ async function ejecutarVenta(productos) {
     if (
       productosConDescuento.length > 0
     ) {
+
       console.log(
         "🏷️ Aplicando descuentos..."
       );
 
       for (const prod of productosConDescuento) {
+
         console.log(
           `🔍 Buscando card carrito: ${prod.nombre}`
         );
 
         // ───────────────────────────────────────────────────────────────
-// ABRIR PRODUCTO DEL CARRITO
-// ───────────────────────────────────────────────────────────────
-const abierto = await frame.evaluate((nombre) => {
+        // ABRIR PRODUCTO
+        // ───────────────────────────────────────────────────────────────
+        const abierto =
+          await frame.evaluate(
+            (nombre) => {
 
-  const product = [
-    ...document.querySelectorAll(
-      '[data-testid^="product-"]'
-    ),
-  ].find((el) => {
+              const product = [
+                ...document.querySelectorAll(
+                  '[data-testid^="product-"]'
+                ),
+              ].find((el) => {
 
-    const testid =
-      el.getAttribute("data-testid") || "";
+                const testid =
+                  el.getAttribute(
+                    "data-testid"
+                  ) || "";
 
-    return testid.includes(
-      `product-${nombre}-`
-    );
-  });
+                return testid.includes(
+                  `product-${nombre}-`
+                );
+              });
 
-  if (!product) return false;
+              if (!product)
+                return false;
 
-  product.scrollIntoView({
-    block: "center",
-  });
+              product.scrollIntoView({
+                block: "center",
+              });
 
-  // CLICK REAL SOBRE LA CARD
-  product.dispatchEvent(
-    new MouseEvent("mousedown", {
-      bubbles: true,
-    })
-  );
+              product.dispatchEvent(
+                new MouseEvent(
+                  "mousedown",
+                  {
+                    bubbles: true,
+                  }
+                )
+              );
 
-  product.dispatchEvent(
-    new MouseEvent("mouseup", {
-      bubbles: true,
-    })
-  );
+              product.dispatchEvent(
+                new MouseEvent(
+                  "mouseup",
+                  {
+                    bubbles: true,
+                  }
+                )
+              );
 
-  product.dispatchEvent(
-    new MouseEvent("click", {
-      bubbles: true,
-    })
-  );
+              product.dispatchEvent(
+                new MouseEvent(
+                  "click",
+                  {
+                    bubbles: true,
+                  }
+                )
+              );
 
-  return true;
+              return true;
 
-}, prod.nombre);
+            },
+            prod.nombre
+          );
 
-if (!abierto) {
-  throw new Error(
-    `❌ No se encontró ${prod.nombre}`
-  );
-}
+        if (!abierto) {
+          throw new Error(
+            `❌ No se encontró ${prod.nombre}`
+          );
+        }
 
-console.log("✅ Card clickeada");
+        console.log(
+          "✅ Card clickeada"
+        );
 
-await delay(1500);
+        await delay(1500);
 
-// ───────────────────────────────────────────────────────────────
-// ESPERAR DRAWER REAL
-// ───────────────────────────────────────────────────────────────
-await frame.waitForFunction(() => {
-
-  // AgendaPro usa drawer/dialog dinámico
-  const dialogs = [
-    ...document.querySelectorAll(
-      '[role="dialog"]'
-    ),
-  ];
-
-  return dialogs.some((d) =>
-    d.innerText
-      ?.toLowerCase()
-      .includes("descuento")
-  );
-
-}, {
-  timeout: 15000,
-});
-
-console.log("✅ Drawer detectado");
         // ───────────────────────────────────────────────────────────────
         // INPUT DESCUENTO
         // ───────────────────────────────────────────────────────────────
+        await frame.waitForSelector(
+          'input[data-testid$=".unitDiscount"]',
+          {
+            timeout: 15000,
+          }
+        );
+
+        console.log(
+          "✅ Input descuento detectado"
+        );
+
         const inputSelector =
           await frame.evaluate(() => {
-            const drawer =
+
+            const input =
               document.querySelector(
-                '[data-testid="edit-item"]'
+                'input[data-testid$=".unitDiscount"]'
               );
 
-            if (!drawer)
+            if (!input)
               return null;
 
-            const inputs = [
-              ...drawer.querySelectorAll(
-                "input"
-              ),
-            ];
-
-            const discountInput =
-              inputs.find((inp) => {
-                const ctx =
-                  inp
-                    .closest("div")
-                    ?.innerText?.toLowerCase() ??
-                  "";
-
-                return ctx.includes(
-                  "descuento"
-                );
-              }) ||
-              inputs.find(
-                (inp) =>
-                  inp.value === "0"
-              ) ||
-              inputs.find(
-                (inp) =>
-                  inp.value === "0.0"
-              ) ||
-              inputs.find(
-                (inp) =>
-                  inp.type ===
-                  "number"
-              );
-
-            if (!discountInput)
-              return null;
-
-            discountInput.id =
+            input.id =
               "temp-discount-input";
 
             return "#temp-discount-input";
+
           });
 
         if (!inputSelector) {
@@ -607,6 +607,7 @@ console.log("✅ Drawer detectado");
         // ───────────────────────────────────────────────────────────────
         await frame.evaluate(
           (pct) => {
+
             const el =
               document.querySelector(
                 "#temp-discount-input"
@@ -647,23 +648,26 @@ console.log("✅ Drawer detectado");
                 }
               )
             );
+
           },
           prod.discount_pct
         );
 
         await delay(500);
 
+        // ENTER
         await page.keyboard.press(
           "Enter"
         );
 
-        await delay(800);
+        await delay(1000);
 
         // ───────────────────────────────────────────────────────────────
         // VALIDAR
         // ───────────────────────────────────────────────────────────────
         const valorFinal =
           await frame.evaluate(() => {
+
             const el =
               document.querySelector(
                 "#temp-discount-input"
@@ -672,6 +676,7 @@ console.log("✅ Drawer detectado");
             return el
               ? el.value
               : null;
+
           });
 
         console.log(
@@ -693,9 +698,10 @@ console.log("✅ Drawer detectado");
         );
 
         // ───────────────────────────────────────────────────────────────
-        // LIMPIAR ID TEMP
+        // LIMPIAR ID
         // ───────────────────────────────────────────────────────────────
         await frame.evaluate(() => {
+
           const el =
             document.querySelector(
               "#temp-discount-input"
@@ -706,6 +712,7 @@ console.log("✅ Drawer detectado");
               "id"
             );
           }
+
         });
 
         // ───────────────────────────────────────────────────────────────
@@ -741,6 +748,7 @@ console.log("✅ Drawer detectado");
     );
 
     await frame.evaluate(() => {
+
       const btn = Array.from(
         document.querySelectorAll(
           "button"
@@ -758,6 +766,7 @@ console.log("✅ Drawer detectado");
       });
 
       btn.click();
+
     });
 
     console.log(
@@ -774,20 +783,24 @@ console.log("✅ Drawer detectado");
     );
 
     await frame.waitForFunction(() => {
+
       const btn =
         document.querySelector(
           '[data-testid="select-payment-method-Transferencia Bancaria"]'
         );
 
       return btn && !btn.disabled;
+
     });
 
     await frame.evaluate(() => {
+
       document
         .querySelector(
           '[data-testid="select-payment-method-Transferencia Bancaria"]'
         )
         ?.click();
+
     });
 
     console.log(
@@ -795,8 +808,11 @@ console.log("✅ Drawer detectado");
     );
 
     await delay(3000);
+
   } finally {
+
     await browser.close();
+
   }
 }
 
