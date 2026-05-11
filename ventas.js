@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  ventas.js — Lógica de ventas Puppeteer (headless para Railway)
+// ventas.js — Lógica de ventas Puppeteer (headless para Railway)
 // ─────────────────────────────────────────────────────────────────────────────
 require("dotenv").config();
 const puppeteer = require("puppeteer");
@@ -34,7 +34,10 @@ async function obtenerDescuentos(productos) {
 
   return productos.map((prod) => {
     const found = data.find((d) => d.nombre === prod.nombre);
-    const tieneDescuento = found?.discount_active && found?.discount_pct > 0;
+
+    const tieneDescuento =
+      found?.discount_active && found?.discount_pct > 0;
+
     const precioFinal = tieneDescuento
       ? Math.round(found.precio * (1 - found.discount_pct / 100))
       : found?.precio ?? null;
@@ -50,7 +53,6 @@ async function obtenerDescuentos(productos) {
 }
 
 async function ejecutarVenta(productos) {
-  // ── Enriquecer con descuentos antes de abrir el browser ───────────────────
   productos = await obtenerDescuentos(productos);
 
   for (const p of productos) {
@@ -73,25 +75,37 @@ async function ejecutarVenta(productos) {
   });
 
   const page = await browser.newPage();
+
   page.setDefaultTimeout(30000);
 
   try {
     // ── LOGIN ────────────────────────────────────────────────────────────────
     console.log("🔐 Login...");
+
     await page.goto("https://app.agendapro.com/login", {
       waitUntil: "networkidle2",
     });
-    await page.waitForSelector('input[placeholder="user@example.com"]');
+
+    await page.waitForSelector(
+      'input[placeholder="user@example.com"]'
+    );
+
     await page.type(
       'input[placeholder="user@example.com"]',
       process.env.AGENDAPRO_EMAIL
     );
+
     await page.type(
       'input[placeholder="Enter your password"]',
       process.env.AGENDAPRO_PASSWORD
     );
+
     await page.click("button");
-    await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+    await page.waitForNavigation({
+      waitUntil: "networkidle2",
+    });
+
     console.log("✅ Login OK");
 
     // ── IR A VENTAS ──────────────────────────────────────────────────────────
@@ -101,11 +115,13 @@ async function ejecutarVenta(productos) {
 
     // ── NUEVA VENTA ──────────────────────────────────────────────────────────
     console.log("🆕 Nueva venta...");
+
     await page.waitForFunction(() =>
       Array.from(document.querySelectorAll("button")).some(
         (b) => b.innerText?.trim() === "+ Nueva venta"
       )
     );
+
     await page.evaluate(() => {
       Array.from(document.querySelectorAll("button"))
         .find((b) => b.innerText?.trim() === "+ Nueva venta")
@@ -114,35 +130,60 @@ async function ejecutarVenta(productos) {
 
     // ── CÓDIGO DE CAJERO ─────────────────────────────────────────────────────
     console.log("🔑 Esperando modal de código de cajero...");
-    await page.waitForSelector('input[placeholder="Código"]', { timeout: 10000 });
-    await page.type('input[placeholder="Código"]', "0305", { delay: 80 });
+
+    await page.waitForSelector(
+      'input[placeholder="Código"]',
+      { timeout: 10000 }
+    );
+
+    await page.type(
+      'input[placeholder="Código"]',
+      "0305",
+      { delay: 80 }
+    );
+
     await page.keyboard.press("Enter");
+
     console.log("✅ Código de cajero ingresado");
 
     await page
       .waitForFunction(
-        () => !document.querySelector('input[placeholder="Código"]'),
+        () =>
+          !document.querySelector(
+            'input[placeholder="Código"]'
+          ),
         { timeout: 8000 }
       )
       .catch(() => {});
-    await delay(800);
+
+    await delay(1000);
 
     // ── IFRAME ───────────────────────────────────────────────────────────────
     await page.waitForSelector('iframe[title="APIframe"]');
+
     const frame = await (
       await page.$('iframe[title="APIframe"]')
     ).contentFrame();
+
     console.log("✅ Iframe listo");
 
     // ── ABRIR CARRO ──────────────────────────────────────────────────────────
     await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some((b) =>
-        b.innerText?.toLowerCase().includes("agregar al carro")
+      Array.from(document.querySelectorAll("button")).some(
+        (b) =>
+          b.innerText
+            ?.toLowerCase()
+            .includes("agregar al carro")
       )
     );
+
     await frame.evaluate(() => {
       Array.from(document.querySelectorAll("button"))
-        .find((b) => b.innerText?.toLowerCase().includes("agregar al carro"))
+        .find((b) =>
+          b.innerText
+            ?.toLowerCase()
+            .includes("agregar al carro")
+        )
         ?.click();
     });
 
@@ -152,42 +193,58 @@ async function ejecutarVenta(productos) {
     for (const prod of productos) {
       console.log(
         `🛍️ Procesando: ${prod.nombre} x${prod.cantidad}` +
-          (prod.tiene_descuento ? ` | ${prod.discount_pct}% OFF` : "")
+          (prod.tiene_descuento
+            ? ` | ${prod.discount_pct}% OFF`
+            : "")
       );
 
-      await frame.waitForSelector('input[type="text"]', { timeout: 10000 });
-      await delay(400);
-
-      await frame.evaluate(() => {
-        const input = document.querySelector('input[type="text"]');
-        if (!input) return;
-        input.focus();
-        input.select();
-        input.dispatchEvent(new Event("select", { bubbles: true }));
+      await frame.waitForSelector('input[type="text"]', {
+        timeout: 10000,
       });
 
-      await delay(200);
+      await delay(500);
+
+      await frame.evaluate(() => {
+        const input =
+          document.querySelector('input[type="text"]');
+
+        if (!input) return;
+
+        input.focus();
+        input.select();
+      });
+
+      await delay(300);
 
       await page.keyboard.down("Control");
       await page.keyboard.press("KeyA");
       await page.keyboard.up("Control");
       await page.keyboard.press("Backspace");
-      await delay(100);
 
-      await frame.type('input[type="text"]', prod.nombre, { delay: 60 });
+      await delay(300);
+
+      await frame.type(
+        'input[type="text"]',
+        prod.nombre,
+        { delay: 60 }
+      );
 
       console.log(`🔍 Buscando: ${prod.nombre}`);
 
       await frame.waitForFunction(
         (nombre) =>
-          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
-        { timeout: 8000 },
+          !!document.querySelector(
+            `[data-testid="${nombre}-show-counter"]`
+          ),
+        { timeout: 10000 },
         prod.nombre
       );
 
       await frame.evaluate((nombre) => {
         document
-          .querySelector(`[data-testid="${nombre}-show-counter"]`)
+          .querySelector(
+            `[data-testid="${nombre}-show-counter"]`
+          )
           ?.click();
       }, prod.nombre);
 
@@ -196,56 +253,72 @@ async function ejecutarVenta(productos) {
         '[data-testid="associate-item-seller-select"]',
         { timeout: 8000 }
       );
+
       await frame.evaluate(() => {
         document
-          .querySelector('[data-testid="associate-item-seller-select"]')
+          .querySelector(
+            '[data-testid="associate-item-seller-select"]'
+          )
           ?.click();
       });
 
       await frame.waitForFunction(() =>
-        Array.from(document.querySelectorAll('[role="option"]')).some((el) =>
+        Array.from(
+          document.querySelectorAll('[role="option"]')
+        ).some((el) =>
           el.innerText?.toLowerCase().includes("ema")
         )
       );
+
       await frame.evaluate(() => {
-        Array.from(document.querySelectorAll('[role="option"]'))
-          .find((el) => el.innerText?.toLowerCase().includes("ema"))
+        Array.from(
+          document.querySelectorAll('[role="option"]')
+        )
+          .find((el) =>
+            el.innerText?.toLowerCase().includes("ema")
+          )
           ?.click();
       });
 
-      await frame
-        .waitForFunction(
-          () => document.querySelectorAll('[role="option"]').length === 0,
-          { timeout: 3000 }
-        )
-        .catch(() => {});
-      await delay(300);
+      await delay(500);
 
       // ── CANTIDAD ───────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         console.log("🔢 Ajustando cantidad...");
+
         for (let i = 1; i < prod.cantidad; i++) {
           await frame.evaluate((nombre) => {
             document
-              .querySelector(`[data-testid="${nombre}-show-counter"]`)
+              .querySelector(
+                `[data-testid="${nombre}-show-counter"]`
+              )
               ?.click();
           }, prod.nombre);
 
-          await frame.waitForSelector(`[data-testid="${prod.nombre}-add"]`, {
-            timeout: 5000,
-          });
+          await frame.waitForSelector(
+            `[data-testid="${prod.nombre}-add"]`,
+            { timeout: 5000 }
+          );
 
           await frame.evaluate((nombre) => {
-            document.querySelector(`[data-testid="${nombre}-add"]`)?.click();
+            document
+              .querySelector(
+                `[data-testid="${nombre}-add"]`
+              )
+              ?.click();
           }, prod.nombre);
 
           const esperado = i + 1;
+
           await frame.waitForFunction(
             (nombre, val) => {
               const btn = document.querySelector(
                 `[data-testid="${nombre}-show-counter"]`
               );
-              return btn?.innerText?.trim() === String(val);
+
+              return (
+                btn?.innerText?.trim() === String(val)
+              );
             },
             { timeout: 4000 },
             prod.nombre,
@@ -258,179 +331,234 @@ async function ejecutarVenta(productos) {
     }
 
     // ── IR AL CARRO ──────────────────────────────────────────────────────────
+    console.log("🛒 Ir al carrito...");
+
     await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some((b) =>
-        b.innerText?.toLowerCase().includes("ir al carro")
+      Array.from(document.querySelectorAll("button")).some(
+        (b) =>
+          b.innerText
+            ?.toLowerCase()
+            .includes("continuar")
       )
     );
-    await frame.evaluate(() => {
-      Array.from(document.querySelectorAll("button"))
-        .find((b) => b.innerText?.toLowerCase().includes("ir al carro"))
-        ?.click();
-    });
 
-    // Esperar que cargue la vista del carro
     await delay(2000);
 
-    // ── APLICAR DESCUENTOS EN EL CARRO ──────────────────────────────────────
+    // ── APLICAR DESCUENTOS ───────────────────────────────────────────────────
     const productosConDescuento = productos.filter(
-      (p) => p.tiene_descuento && p.discount_pct > 0
+      (p) =>
+        p.tiene_descuento &&
+        p.discount_pct > 0
     );
 
     if (productosConDescuento.length > 0) {
-      console.log("🏷️ Aplicando descuentos en el carro...");
+      console.log(
+        "🏷️ Aplicando descuentos en carrito..."
+      );
 
       for (const prod of productosConDescuento) {
-        console.log(`💸 Abriendo panel de: ${prod.nombre}`);
-
-        // Usar show-counter — mismo testid del loop de productos
-        const existe = await frame.evaluate((nombre) => {
-          const btn = document.querySelector(
-            `[data-testid="${nombre}-show-counter"]`
-          );
-          if (btn) { btn.click(); return true; }
-          return false;
-        }, prod.nombre);
-
-        if (!existe) {
-          throw new Error(
-            `❌ No se encontró "${prod.nombre}" en el carro. Abortando venta.`
-          );
-        }
-
-        await delay(1000);
-
-        // Esperar input de descuento — obligatorio
-        await frame.waitForFunction(
-          () => {
-            const inputs = [...document.querySelectorAll("input")];
-            return inputs.some(
-              (inp) =>
-                inp.closest("div, label, section")?.innerText
-                  ?.toLowerCase()
-                  .includes("descuento") ||
-                inp.value === "0.0" ||
-                inp.value === "0"
-            );
-          },
-          { timeout: 8000 }
+        console.log(
+          `💸 Abriendo panel: ${prod.nombre}`
         );
 
-        console.log(`✏️ Input de descuento encontrado para: ${prod.nombre}`);
+        const abierto = await frame.evaluate(
+          (nombre) => {
+            const elements = [
+              ...document.querySelectorAll("*"),
+            ];
 
-        // Triple-click + setter nativo React
-        await frame.evaluate((pct) => {
-          const inputs = [...document.querySelectorAll("input")];
+            const target = elements.find((el) => {
+              const txt =
+                el.innerText?.toLowerCase() || "";
 
-          const discountInput =
-            inputs.find((inp) => {
-              const ctx =
-                inp.closest("div, label, section")?.innerText?.toLowerCase() ??
-                "";
-              return ctx.includes("descuento");
-            }) ??
-            inputs.find((inp) => inp.value === "0.0" || inp.value === "0");
+              return (
+                txt.includes(nombre.toLowerCase()) &&
+                txt.length < 300
+              );
+            });
 
-          if (!discountInput) return;
+            if (!target) return false;
 
-          discountInput.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, detail: 3 })
-          );
-          discountInput.select();
+            target.click();
 
-          const setter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype,
-            "value"
-          ).set;
-          setter.call(discountInput, String(pct));
+            return true;
+          },
+          prod.nombre
+        );
 
-          discountInput.dispatchEvent(new Event("input",  { bubbles: true }));
-          discountInput.dispatchEvent(new Event("change", { bubbles: true }));
-        }, prod.discount_pct);
-
-        await delay(300);
-        await frame.keyboard.press("Enter");
-        await delay(800);
-
-        // Verificar que el valor cambió
-        const valorFinal = await frame.evaluate(() => {
-          const inputs = [...document.querySelectorAll("input")];
-          const discountInput =
-            inputs.find((inp) => {
-              const ctx =
-                inp.closest("div, label, section")?.innerText?.toLowerCase() ??
-                "";
-              return ctx.includes("descuento");
-            }) ??
-            inputs.find((inp) => inp.type === "number");
-          return discountInput ? discountInput.value : null;
-        });
-
-        console.log(`🔍 Valor descuento después de Enter: ${valorFinal}`);
-
-        if (valorFinal === "0" || valorFinal === "0.0" || valorFinal === null) {
+        if (!abierto) {
           throw new Error(
-            `❌ Descuento no aplicado en "${prod.nombre}". Valor: ${valorFinal}. Abortando.`
+            `❌ No se encontró "${prod.nombre}" en carrito`
           );
         }
 
-        console.log(`✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`);
+        await delay(2000);
 
-        // Volver atrás para el siguiente producto
-        await frame.evaluate(() => {
-          const back = document.querySelector('[data-testid="back-button"]');
-          if (back) { back.click(); return; }
-          const btns = [...document.querySelectorAll("button")];
-          const backBtn = btns.find(
-            (b) => b.querySelector("svg") && b.innerText?.trim() === ""
-          );
-          backBtn?.click();
+        console.log(
+          `✏️ Buscando input descuento...`
+        );
+
+        await frame.waitForFunction(() => {
+          return [
+            ...document.querySelectorAll("input"),
+          ].some((inp) => {
+            const ctx =
+              inp
+                .closest("div, section, label")
+                ?.innerText?.toLowerCase() || "";
+
+            return (
+              ctx.includes("descuento") ||
+              inp.value === "0.0" ||
+              inp.value === "0"
+            );
+          });
         });
 
-        await delay(800);
+        await frame.evaluate((pct) => {
+          const inputs = [
+            ...document.querySelectorAll("input"),
+          ];
+
+          const discountInput =
+            inputs.find((inp) => {
+              const ctx =
+                inp
+                  .closest("div, section, label")
+                  ?.innerText?.toLowerCase() ||
+                "";
+
+              return ctx.includes("descuento");
+            }) ||
+            inputs.find(
+              (inp) => inp.value === "0.0"
+            ) ||
+            inputs.find(
+              (inp) => inp.value === "0"
+            );
+
+          if (!discountInput) {
+            throw new Error(
+              "No se encontró input descuento"
+            );
+          }
+
+          discountInput.focus();
+          discountInput.select();
+
+          const nativeSetter =
+            Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              "value"
+            ).set;
+
+          nativeSetter.call(
+            discountInput,
+            String(pct)
+          );
+
+          discountInput.dispatchEvent(
+            new Event("input", {
+              bubbles: true,
+            })
+          );
+
+          discountInput.dispatchEvent(
+            new Event("change", {
+              bubbles: true,
+            })
+          );
+        }, prod.discount_pct);
+
+        await delay(500);
+
+        await frame.keyboard.press("Enter");
+
+        console.log(
+          `✅ Descuento aplicado: ${prod.discount_pct}%`
+        );
+
+        await delay(1500);
+
+        // ── VOLVER ATRÁS ────────────────────────────────────────────────────
+        await frame.evaluate(() => {
+          const backBtn =
+            document.querySelector(
+              '[data-testid="back-button"]'
+            ) ||
+            [...document.querySelectorAll("button")].find(
+              (b) => {
+                return (
+                  b.querySelector("svg") &&
+                  b.innerText.trim() === ""
+                );
+              }
+            );
+
+          if (backBtn) backBtn.click();
+        });
+
+        await delay(1200);
       }
 
-      console.log("✅ Todos los descuentos aplicados");
+      console.log(
+        "✅ Todos los descuentos aplicados"
+      );
     }
 
     // ── CONTINUAR ────────────────────────────────────────────────────────────
-    await delay(1500);
-    console.log("➡️ Click en Continuar...");
+    console.log("➡️ Click continuar...");
 
     await frame.waitForFunction(() =>
-      Array.from(document.querySelectorAll("button")).some((b) =>
-        b.innerText?.toLowerCase().includes("continuar")
+      Array.from(document.querySelectorAll("button")).some(
+        (b) =>
+          b.innerText
+            ?.toLowerCase()
+            .includes("continuar")
       )
     );
+
     await frame.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll("button")).find((b) =>
-        b.innerText?.toLowerCase().includes("continuar")
+      const btn = Array.from(
+        document.querySelectorAll("button")
+      ).find((b) =>
+        b.innerText
+          ?.toLowerCase()
+          .includes("continuar")
       );
+
       if (btn) {
-        btn.scrollIntoView({ block: "center" });
+        btn.scrollIntoView({
+          block: "center",
+        });
+
         btn.click();
       }
     });
 
     console.log("✅ Continuar clickeado");
 
-    // ── MÉTODO DE PAGO ────────────────────────────────────────────────────────
+    // ── MÉTODO DE PAGO ───────────────────────────────────────────────────────
     await delay(3000);
-    console.log("➡️ Esperando panel de método de pago...");
 
-    await frame.waitForSelector('[data-testid="select-payment-method"]', {
-      timeout: 10000,
-    });
-
-    await frame.waitForFunction(
-      () => {
-        const btn = document.querySelector(
-          '[data-testid="select-payment-method-Transferencia Bancaria"]'
-        );
-        return btn && !btn.disabled;
-      },
-      { timeout: 10000 }
+    console.log(
+      "➡️ Esperando método de pago..."
     );
+
+    await frame.waitForSelector(
+      '[data-testid="select-payment-method"]',
+      {
+        timeout: 10000,
+      }
+    );
+
+    await frame.waitForFunction(() => {
+      const btn = document.querySelector(
+        '[data-testid="select-payment-method-Transferencia Bancaria"]'
+      );
+
+      return btn && !btn.disabled;
+    });
 
     await frame.evaluate(() => {
       document
@@ -440,11 +568,16 @@ async function ejecutarVenta(productos) {
         ?.click();
     });
 
-    console.log("✅ Transferencia Bancaria seleccionada");
+    console.log(
+      "✅ Transferencia Bancaria seleccionada"
+    );
+
     await delay(3000);
   } finally {
     await browser.close();
   }
 }
 
-module.exports = { ejecutarVenta };
+module.exports = {
+  ejecutarVenta,
+};
