@@ -301,65 +301,26 @@ async function ejecutarVenta(productos) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
 
         // ───────────────────────────────────────────────────────────────────
-        // ABRIR PRODUCTO DEL CARRITO (click real via ElementHandle)
+        // ABRIR PRODUCTO DEL CARRITO
+        // data-testid real confirmado: "edit-product-${nombre}"
         // ───────────────────────────────────────────────────────────────────
-        const cardHandle = await frame.evaluateHandle((nombre) => {
-          return [...document.querySelectorAll('[data-testid^="product-"]')]
-            .find((el) =>
-              el.getAttribute("data-testid")?.includes(`product-${nombre}-`)
-            );
-        }, prod.nombre);
+        const btnSelector = `[data-testid="edit-product-${prod.nombre}"]`;
 
-        const cardExiste = await cardHandle.evaluate((el) => !!el);
+        await frame.waitForSelector(btnSelector, { timeout: 10000 });
 
-        if (!cardExiste) {
-          throw new Error(
-            `❌ No se encontró card de "${prod.nombre}" en el carrito`
-          );
-        }
+        const btnHandle = await frame.$(btnSelector);
 
-        // Scroll y click real CDP — no dispatchEvent
-        await cardHandle.evaluate((el) =>
+        await btnHandle.evaluate((el) =>
           el.scrollIntoView({ block: "center" })
         );
-        await delay(500);
-        await cardHandle.click();
+        await delay(300);
+        await btnHandle.click();
 
         console.log("✅ Card clickeada");
 
-
-await delay(2000); // dar tiempo al drawer
-
-// DEBUG: buscar el input en AMBOS contextos
-const enFrame = await frame.evaluate(() =>
-  !!document.querySelector('input[data-testid$="unitDiscount"]')
-);
-const enPage = await page.evaluate(() =>
-  !!document.querySelector('input[data-testid$="unitDiscount"]')
-);
-const todosInputsFrame = await frame.evaluate(() =>
-  [...document.querySelectorAll("input")].map((i) => ({
-    testid: i.dataset.testid,
-    name: i.name,
-    type: i.type,
-    value: i.value,
-  }))
-);
-const todosInputsPage = await page.evaluate(() =>
-  [...document.querySelectorAll("input")].map((i) => ({
-    testid: i.dataset.testid,
-    name: i.name,
-    type: i.type,
-    value: i.value,
-  }))
-);
-
-console.log("🔍 Input en frame:", enFrame);
-console.log("🔍 Input en page:", enPage);
-console.log("🔍 Inputs frame:", JSON.stringify(todosInputsFrame, null, 2));
-console.log("🔍 Inputs page:", JSON.stringify(todosInputsPage, null, 2));
         // ───────────────────────────────────────────────────────────────────
         // ESPERAR INPUT DE DESCUENTO
+        // data-testid real: "items.X.unitDiscount"
         // ───────────────────────────────────────────────────────────────────
         console.log("⏳ Esperando input de descuento...");
 
