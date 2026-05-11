@@ -49,6 +49,36 @@ async function obtenerDescuentos(productos) {
   });
 }
 
+// ── Helper: cerrar drawer de forma robusta ───────────────────────────────────
+async function cerrarDrawer(frame) {
+  const drawerExiste = await frame.evaluate(() => {
+    const drawer = document.querySelector('[data-testid="edit-item"]');
+    return !!drawer && drawer.getAttribute("data-state") === "open";
+  });
+
+  if (!drawerExiste) return;
+
+  console.log("🔒 Cerrando drawer...");
+  await frame.evaluate(() => document.activeElement?.blur());
+  await frame.keyboard.press("Escape");
+  await delay(600);
+
+  // Esperar a que desaparezca o cambie a closed
+  await frame
+    .waitForFunction(
+      () => {
+        const drawer = document.querySelector('[data-testid="edit-item"]');
+        return !drawer || drawer.getAttribute("data-state") === "closed";
+      },
+      { timeout: 5000 }
+    )
+    .catch(() => {
+      console.log("⚠️ Drawer no respondió al Escape, forzando click fuera...");
+    });
+
+  await delay(400);
+}
+
 async function ejecutarVenta(productos) {
   // ── Enriquecer con descuentos antes de abrir el browser ───────────────────
   productos = await obtenerDescuentos(productos);
@@ -269,7 +299,8 @@ async function ejecutarVenta(productos) {
         ?.click();
     });
 
-    await delay(2000);
+    console.log("🛒 Carrito abierto");
+    await delay(2500);
 
     // ── APLICAR DESCUENTOS EN EL CARRO ──────────────────────────────────────
     const productosConDescuento = productos.filter(
@@ -279,44 +310,82 @@ async function ejecutarVenta(productos) {
     if (productosConDescuento.length > 0) {
       console.log("🏷️ Aplicando descuentos en el carro...");
 
+      // Al entrar al carrito, el drawer del último producto puede venir abierto.
+      // Lo cerramos antes de empezar.
+      await cerrarDrawer(frame);
+
       for (const prod of productosConDescuento) {
-        console.log(`💸 Abriendo panel de: ${prod.nombre}`);
+        console.log(`💸 Procesando descuento de: ${prod.nombre}`);
 
-        // 1) Cerrar drawer si quedó abierto de la iteración anterior
-        await frame.evaluate(() => {
+        // Verificar si el drawer ya está abierto para este producto
+        const drawerYaAbierto = await frame.evaluate((nombre) => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
-          if (drawer && drawer.getAttribute("data-state") === "open") {
-            document.dispatchEvent(
-              new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
-            );
+          if (!drawer || drawer.getAttribute("data-state") !== "open")
+            return false;
+          return drawer.innerText.includes(nombre);
+        }, prod.nombre);
+
+        if (!drawerYaAbierto) {
+          // Cerrar cualquier drawer que pudiera estar abierto de otra cosa
+          await cerrarDrawer(frame);
+
+          // Buscar el producto en el carrito y hacer click REAL
+          const productSelector = `[data-cy="${prod.nombre}"]`;
+          const existeEnCarro = await frame.evaluate(
+            (sel) => !!document.querySelector(sel),
+            productSelector
+          );
+
+          if (!existeEnCarro) {
+            // Fallback: buscar por data-testid que contenga el nombre
+            const fallbackSelector = await frame.evaluate((nombre) => {
+              const items = [...document.querySelectorAll("[data-testid]")];
+              const match = items.find((el) =>
+                el
+                  .getAttribute("data-testid")
+                  ?.toLowerCase()
+                  .includes(nombre.toLowerCase())
+              );
+              return match ? `[data-testid="${match.getAttribute("data-testid")}"]` : null;
+            }, prod.nombre);
+
+            if (!fallbackSelector) {
+              throw new Error(
+                `❌ No se encontró "${prod.nombre}" en el carrito. Abortando venta.`
+              );
+            }
+            console.log(`🔎 Fallback selector: ${fallbackSelector}`);
+            await frame.waitForSelector(fallbackSelector, { timeout: 8000 });
+            await frame.evaluate((sel) => {
+              document.querySelector(sel)?.scrollIntoView({ block: "center", behavior: "instant" });
+            }, fallbackSelector);
+            await delay(300);
+            await frame.click(fallbackSelector);
+          } else {
+            await frame.waitForSelector(productSelector, { timeout: 8000 });
+            await frame.evaluate((sel) => {
+              document.querySelector(sel)?.scrollIntoView({ block: "center", behavior: "instant" });
+            }, productSelector);
+            await delay(300);
+            await frame.click(productSelector);
           }
-        });
-        await delay(700);
 
-        // 2) Click REAL en el producto del carrito (scroll + click nativo)
-        const productSelector = `[data-cy="${prod.nombre}"]`;
-        await frame.waitForSelector(productSelector, { timeout: 8000 });
+          console.log(`🖱️ Click en producto del carro OK`);
 
-        await frame.evaluate((sel) => {
-          const el = document.querySelector(sel);
-          if (el) el.scrollIntoView({ block: "center", behavior: "instant" });
-        }, productSelector);
+          // Esperar a que el drawer se abra (data-state="open")
+          await frame.waitForFunction(
+            () => {
+              const drawer = document.querySelector('[data-testid="edit-item"]');
+              return drawer && drawer.getAttribute("data-state") === "open";
+            },
+            { timeout: 10000 }
+          );
+          console.log(`✏️ Panel edit-item abierto para: ${prod.nombre}`);
+        } else {
+          console.log(`✏️ Drawer ya estaba abierto para: ${prod.nombre}`);
+        }
 
-        await delay(300);
-        await frame.click(productSelector);
-        console.log(`🖱️ Click en producto del carro OK`);
-
-        // 3) Esperar a que el drawer se abra (data-state="open")
-        await frame.waitForFunction(
-          () => {
-            const drawer = document.querySelector('[data-testid="edit-item"]');
-            return drawer && drawer.getAttribute("data-state") === "open";
-          },
-          { timeout: 10000 }
-        );
-        console.log(`✏️ Panel edit-item abierto para: ${prod.nombre}`);
-
-        // 4) Esperar input de descuento dentro del drawer
+        // ── Esperar input de descuento dentro del drawer ─────────────────────
         await frame.waitForFunction(
           () => {
             const drawer = document.querySelector('[data-testid="edit-item"]');
@@ -326,7 +395,10 @@ async function ejecutarVenta(productos) {
               (inp) =>
                 inp.value === "0.0" ||
                 inp.value === "0" ||
-                inp.closest("div")?.innerText?.toLowerCase().includes("descuento")
+                inp
+                  .closest("div")
+                  ?.innerText?.toLowerCase()
+                  .includes("descuento")
             );
           },
           { timeout: 10000 }
@@ -334,7 +406,7 @@ async function ejecutarVenta(productos) {
 
         console.log(`✏️ Input de descuento encontrado para: ${prod.nombre}`);
 
-        // 5) Limpiar y escribir descuento
+        // ── Limpiar y escribir descuento ────────────────────────────────────
         await frame.evaluate((pct) => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
           const inputs = [
@@ -345,7 +417,8 @@ async function ejecutarVenta(productos) {
 
           const discountInput =
             inputs.find((inp) => {
-              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
+              const ctx =
+                inp.closest("div")?.innerText?.toLowerCase() ?? "";
               return ctx.includes("descuento");
             }) ??
             inputs.find((inp) => inp.value === "0.0" || inp.value === "0");
@@ -371,7 +444,7 @@ async function ejecutarVenta(productos) {
         await frame.keyboard.press("Enter");
         await delay(800);
 
-        // 6) Verificar que el valor cambió
+        // ── Verificar que el valor cambió ───────────────────────────────────
         const valorFinal = await frame.evaluate(() => {
           const drawer = document.querySelector('[data-testid="edit-item"]');
           const inputs = [
@@ -381,7 +454,8 @@ async function ejecutarVenta(productos) {
           ];
           const discountInput =
             inputs.find((inp) => {
-              const ctx = inp.closest("div")?.innerText?.toLowerCase() ?? "";
+              const ctx =
+                inp.closest("div")?.innerText?.toLowerCase() ?? "";
               return ctx.includes("descuento");
             }) ?? inputs.find((inp) => inp.type === "number");
           return discountInput ? discountInput.value : null;
@@ -389,15 +463,21 @@ async function ejecutarVenta(productos) {
 
         console.log(`🔍 Valor descuento después de Enter: ${valorFinal}`);
 
-        if (valorFinal === "0" || valorFinal === "0.0" || valorFinal === null) {
+        if (
+          valorFinal === "0" ||
+          valorFinal === "0.0" ||
+          valorFinal === null
+        ) {
           throw new Error(
             `❌ Descuento no aplicado en "${prod.nombre}". Valor: ${valorFinal}. Abortando.`
           );
         }
 
-        console.log(`✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`);
+        console.log(
+          `✅ Descuento ${prod.discount_pct}% confirmado: ${prod.nombre}`
+        );
 
-        // 7) Cerrar drawer con Escape (el botón de cerrar tiene am-hidden)
+        // ── Cerrar drawer con Escape (el botón de cerrar tiene am-hidden) ───
         await frame.keyboard.press("Escape");
         await delay(800);
       }
