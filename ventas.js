@@ -198,9 +198,7 @@ async function ejecutarVenta(productos) {
 
       await frame.waitForFunction(
         (nombre) =>
-          !!document.querySelector(
-            `[data-testid="${nombre}-show-counter"]`
-          ),
+          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
         { timeout: 10000 },
         prod.nombre
       );
@@ -303,40 +301,40 @@ async function ejecutarVenta(productos) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
 
         // ───────────────────────────────────────────────────────────────────
-        // ABRIR PRODUCTO DEL CARRITO
+        // ABRIR PRODUCTO DEL CARRITO (click real via ElementHandle)
         // ───────────────────────────────────────────────────────────────────
-        const abierto = await frame.evaluate((nombre) => {
-          const product = [
-            ...document.querySelectorAll('[data-testid^="product-"]'),
-          ].find((el) => {
-            const testid = el.getAttribute("data-testid") || "";
-            return testid.includes(`product-${nombre}-`);
-          });
-
-          if (!product) return false;
-
-          product.scrollIntoView({ block: "center" });
-
-          product.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-          product.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true }));
-          product.dispatchEvent(new MouseEvent("click",     { bubbles: true }));
-
-          return true;
+        const cardHandle = await frame.evaluateHandle((nombre) => {
+          return [...document.querySelectorAll('[data-testid^="product-"]')]
+            .find((el) =>
+              el.getAttribute("data-testid")?.includes(`product-${nombre}-`)
+            );
         }, prod.nombre);
 
-        if (!abierto) {
-          throw new Error(`❌ No se encontró card de "${prod.nombre}" en el carrito`);
+        const cardExiste = await cardHandle.evaluate((el) => !!el);
+
+        if (!cardExiste) {
+          throw new Error(
+            `❌ No se encontró card de "${prod.nombre}" en el carrito`
+          );
         }
+
+        // Scroll y click real CDP — no dispatchEvent
+        await cardHandle.evaluate((el) =>
+          el.scrollIntoView({ block: "center" })
+        );
+        await delay(500);
+        await cardHandle.click();
 
         console.log("✅ Card clickeada");
 
         // ───────────────────────────────────────────────────────────────────
-        // ESPERAR INPUT DE DESCUENTO (apunta directo al data-testid real)
+        // ESPERAR INPUT DE DESCUENTO
         // ───────────────────────────────────────────────────────────────────
         console.log("⏳ Esperando input de descuento...");
 
         await frame.waitForFunction(
-          () => !!document.querySelector('input[data-testid$="unitDiscount"]'),
+          () =>
+            !!document.querySelector('input[data-testid$="unitDiscount"]'),
           { timeout: 15000 }
         );
 
