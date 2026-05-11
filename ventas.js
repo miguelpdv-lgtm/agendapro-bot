@@ -49,19 +49,23 @@ async function obtenerDescuentos(productos) {
   });
 }
 
+// ── Helper: verificar si drawer está abierto ─────────────────────────────────
+async function drawerEstaAbierto(frame) {
+  return frame.evaluate(() => {
+    const drawer = document.querySelector('[data-testid="edit-item"]');
+    return drawer && drawer.getAttribute("data-state") === "open";
+  });
+}
+
 // ── Helper: cerrar drawer de forma robusta ───────────────────────────────────
 async function cerrarDrawer(frame) {
-  const drawerExiste = await frame.evaluate(() => {
-    const drawer = document.querySelector('[data-testid="edit-item"]');
-    return !!drawer && drawer.getAttribute("data-state") === "open";
-  });
-
-  if (!drawerExiste) return;
+  const abierto = await drawerEstaAbierto(frame);
+  if (!abierto) return;
 
   console.log("🔒 Cerrando drawer...");
   await frame.evaluate(() => document.activeElement?.blur());
   await frame.keyboard.press("Escape");
-  await delay(600);
+  await delay(800);
 
   await frame
     .waitForFunction(
@@ -72,80 +76,210 @@ async function cerrarDrawer(frame) {
       { timeout: 5000 }
     )
     .catch(() => {
-      console.log("⚠️ Drawer no cerró con Escape, intentando click fuera...");
+      console.log("⚠️ Drawer no cerró con Escape");
     });
 
-  await delay(400);
+  await delay(500);
 }
 
-// ── Helper: click robusto en elemento del iframe ─────────────────────────────
-async function clickRobusto(frame, selector, nombreProducto) {
-  console.log(`🎯 Buscando selector: ${selector}`);
+// ── Helper: click robusto en producto del carrito ────────────────────────────
+async function clickProductoCarrito(frame, nombreProducto) {
+  console.log(`🔍 Buscando "${nombreProducto}" en el carrito...`);
 
-  // 1) Esperar a que exista
-  await frame.waitForSelector(selector, { timeout: 8000 });
+  // Asegurar que el carrito está renderizado
+  await frame.waitForSelector('[data-testid="cart-items"]', { timeout: 10000 });
+  await delay(500);
 
-  // 2) Obtener ElementHandle y hacer click nativo de Puppeteer
-  const el = await frame.$(selector);
-  if (!el) {
-    throw new Error(`❌ No se encontró el elemento para "${nombreProducto}"`);
+  // Buscar el elemento del producto (por data-cy, data-testid, o texto)
+  const elInfo = await frame.evaluate((nombre) => {
+    const cartItems = document.querySelector('[data-testid="cart-items"]');
+    if (!cartItems) return { error: "No hay cart-items" };
+
+    let el = document.querySelector(`[data-cy="${nombre}"]`);
+    let metodo = "data-cy";
+
+    if (!el) {
+      const todos = [...cartItems.querySelectorAll("[data-testid]")];
+      el = todos.find((x) =>
+        x.getAttribute("data-testid").toLowerCase().includes(nombre.toLowerCase())
+      );
+      metodo = "data-testid";
+    }
+
+    if (!el) {
+      const todos = [...cartItems.querySelectorAll("*")];
+      el = todos.find((x) => x.innerText?.trim() === nombre);
+      metodo = "texto";
+    }
+
+    if (!el) {
+      const ids = [...cartItems.querySelectorAll("[data-testid]")].map((x) =>
+        x.getAttribute("data-testid")
+      );
+      return { error: "No encontrado", disponibles: ids };
+    }
+
+    // Loguear info del elemento para debug
+    return {
+      metodo,
+      tag: el.tagName,
+      class: el.className,
+      dataTestid: el.getAttribute("data-testid"),
+      dataCy: el.getAttribute("data-cy"),
+      rect: el.getBoundingClientRect
+        ? {
+            top: el.getBoundingClientRect().top,
+            left: el.getBoundingClientRect().left,
+            width: el.getBoundingClientRect().width,
+            height: el.getBoundingClientRect().height,
+          }
+        : null,
+      parentTag: el.parentElement?.tagName,
+      parentClass: el.parentElement?.className,
+      html: el.outerHTML.substring(0, 300),
+    };
+  }, nombreProducto);
+
+  if (elInfo.error) {
+    console.log("📋 Productos disponibles en carrito:", elInfo.disponibles);
+    throw new Error(`❌ ${nombreProducto} no encontrado en carrito: ${elInfo.error}`);
   }
+
+  console.log("📦 Elemento encontrado:", JSON.stringify(elInfo, null, 2));
+
+  // Reconstruir selector basado en lo que encontramos
+  let selector;
+  if (elInfo.dataCy) {
+    selector = `[data-cy="${nombreProducto}"]`;
+  } else if (elInfo.dataTestid) {
+    selector = `[data-testid="${elInfo.dataTestid}"]`;
+  } else {
+    selector = `text=${nombreProducto}`;
+  }
+
+  await frame.waitForSelector(selector, { timeout: 5000 });
+  const el = await frame.$(selector);
+  if (!el) throw new Error("❌ ElementHandle es null");
 
   // Scroll asegurado
   await el.evaluate((node) =>
     node.scrollIntoView({ block: "center", behavior: "instant" })
   );
-  await delay(400);
-
-  console.log(`🖱️ Click nativo en "${nombreProducto}"...`);
-  try {
-    await el.click({ delay: 50 });
-  } catch (e) {
-    console.log(`⚠️ Click nativo falló: ${e.message}`);
-  }
-
   await delay(600);
 
-  // 3) Verificar si el drawer se abrió
-  const drawerAbierto = await frame.evaluate(() => {
-    const drawer = document.querySelector('[data-testid="edit-item"]');
-    return drawer && drawer.getAttribute("data-state") === "open";
-  });
+  // ═══════════════════════════════════════════════════════════════════════
+  // ESTRATEGIA 1: hover + click nativo en el elemento encontrado
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log(`🖱️ Estrategia 1: hover + click nativo en ${selector}`);
+  try {
+    await el.hover();
+    await delay(300);
+    await el.click({ delay: 80 });
+  } catch (e) {
+    console.log(`⚠️ Estrategia 1 error: ${e.message}`);
+  }
+  await delay(1200);
 
-  if (drawerAbierto) {
-    console.log(`✅ Drawer abierto con click nativo`);
+  if (await drawerEstaAbierto(frame)) {
+    console.log("✅ Drawer abierto con Estrategia 1");
     return;
   }
 
-  // 4) Si no se abrió, forzar evento JS click
-  console.log(`🔄 Forzando evento JS click en "${nombreProducto}"...`);
-  await el.evaluate((node) => {
-    const events = ["mousedown", "mouseup", "click"];
-    events.forEach((type) => {
-      const evt = new MouseEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-      });
-      node.dispatchEvent(evt);
+  // ═══════════════════════════════════════════════════════════════════════
+  // ESTRATEGIA 2: click en el PADRE del elemento (listener puede estar arriba)
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log(`🖱️ Estrategia 2: click en el elemento padre`);
+  try {
+    const parentClicked = await el.evaluate((node) => {
+      if (node.parentElement) {
+        node.parentElement.scrollIntoView({ block: "center", behavior: "instant" });
+        node.parentElement.click();
+        return true;
+      }
+      return false;
     });
-  });
+    if (!parentClicked) console.log("⚠️ No hay padre para clickear");
+  } catch (e) {
+    console.log(`⚠️ Estrategia 2 error: ${e.message}`);
+  }
+  await delay(1200);
 
-  await delay(800);
-
-  // 5) Última verificación
-  const drawerAbierto2 = await frame.evaluate(() => {
-    const drawer = document.querySelector('[data-testid="edit-item"]');
-    return drawer && drawer.getAttribute("data-state") === "open";
-  });
-
-  if (!drawerAbierto2) {
-    throw new Error(
-      `❌ No se pudo abrir el drawer de "${nombreProducto}" después de 2 intentos.`
-    );
+  if (await drawerEstaAbierto(frame)) {
+    console.log("✅ Drawer abierto con Estrategia 2");
+    return;
   }
 
-  console.log(`✅ Drawer abierto con evento JS`);
+  // ═══════════════════════════════════════════════════════════════════════
+  // ESTRATEGIA 3: click en el PRIMER BOTÓN o elemento interactivo dentro
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log(`🖱️ Estrategia 3: click en primer elemento interactivo interno`);
+  try {
+    await frame.evaluate((nombre) => {
+      const el = document.querySelector(`[data-cy="${nombre}"]`);
+      if (!el) return;
+      const clickable =
+        el.querySelector('button, [role="button"], a, svg, [class*="cursor-pointer"]') ||
+        el;
+      clickable.scrollIntoView({ block: "center", behavior: "instant" });
+      clickable.click();
+    }, nombreProducto);
+  } catch (e) {
+    console.log(`⚠️ Estrategia 3 error: ${e.message}`);
+  }
+  await delay(1200);
+
+  if (await drawerEstaAbierto(frame)) {
+    console.log("✅ Drawer abierto con Estrategia 3");
+    return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ESTRATEGIA 4: secuencia completa pointer + mouse JS con coordenadas reales
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log(`🖱️ Estrategia 4: eventos JS pointer + mouse con coordenadas`);
+  try {
+    await frame.evaluate((nombre) => {
+      const el = document.querySelector(`[data-cy="${nombre}"]`);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+
+      const opts = (type) => ({
+        bubbles: true,
+        cancelable: true,
+        clientX: cx,
+        clientY: cy,
+        screenX: cx,
+        screenY: cy,
+        pointerType: "mouse",
+        button: 0,
+        isPrimary: true,
+      });
+
+      el.dispatchEvent(new PointerEvent("pointerover", opts()));
+      el.dispatchEvent(new MouseEvent("mouseover", opts()));
+      el.dispatchEvent(new PointerEvent("pointerenter", opts()));
+      el.dispatchEvent(new MouseEvent("mouseenter", opts()));
+      el.dispatchEvent(new PointerEvent("pointerdown", opts()));
+      el.dispatchEvent(new MouseEvent("mousedown", opts()));
+      el.dispatchEvent(new PointerEvent("pointerup", opts()));
+      el.dispatchEvent(new MouseEvent("mouseup", opts()));
+      el.dispatchEvent(new MouseEvent("click", opts()));
+    }, nombreProducto);
+  } catch (e) {
+    console.log(`⚠️ Estrategia 4 error: ${e.message}`);
+  }
+  await delay(1500);
+
+  if (await drawerEstaAbierto(frame)) {
+    console.log("✅ Drawer abierto con Estrategia 4");
+    return;
+  }
+
+  throw new Error(
+    `❌ No se pudo abrir el drawer de "${nombreProducto}" después de 4 estrategias.`
+  );
 }
 
 async function ejecutarVenta(productos) {
@@ -369,7 +503,7 @@ async function ejecutarVenta(productos) {
     });
 
     console.log("🛒 Carrito abierto");
-    await delay(3000);
+    await delay(3500); // Más tiempo para que termine la animación del cart drawer
 
     // ── APLICAR DESCUENTOS EN EL CARRO ──────────────────────────────────────
     const productosConDescuento = productos.filter(
@@ -379,44 +513,14 @@ async function ejecutarVenta(productos) {
     if (productosConDescuento.length > 0) {
       console.log("🏷️ Aplicando descuentos en el carro...");
 
-      // Al entrar al carrito, el drawer del último producto puede venir abierto.
+      // Cerrar cualquier drawer que haya quedado abierto
       await cerrarDrawer(frame);
 
       for (const prod of productosConDescuento) {
-        console.log(`💸 Procesando descuento de: ${prod.nombre}`);
+        console.log(`\n💸 Procesando descuento de: ${prod.nombre}`);
 
-        // Buscar el producto en el carrito por data-cy o data-testid
-        let selector = `[data-cy="${prod.nombre}"]`;
-        let existe = await frame.evaluate(
-          (sel) => !!document.querySelector(sel),
-          selector
-        );
-
-        if (!existe) {
-          // Fallback: buscar data-testid que contenga el nombre
-          selector = await frame.evaluate((nombre) => {
-            const items = [...document.querySelectorAll("[data-testid]")];
-            const match = items.find((el) =>
-              el
-                .getAttribute("data-testid")
-                ?.toLowerCase()
-                .includes(nombre.toLowerCase())
-            );
-            return match
-              ? `[data-testid="${match.getAttribute("data-testid")}"]`
-              : null;
-          }, prod.nombre);
-
-          if (!selector) {
-            throw new Error(
-              `❌ No se encontró "${prod.nombre}" en el carrito. Abortando venta.`
-            );
-          }
-          console.log(`🔎 Fallback selector: ${selector}`);
-        }
-
-        // Click robusto que reintenta si el drawer no se abre
-        await clickRobusto(frame, selector, prod.nombre);
+        // Click robusto en el producto del carrito
+        await clickProductoCarrito(frame, prod.nombre);
 
         // ── Esperar input de descuento dentro del drawer ─────────────────────
         await frame.waitForFunction(
@@ -512,10 +616,10 @@ async function ejecutarVenta(productos) {
 
         // ── Cerrar drawer con Escape ────────────────────────────────────────
         await frame.keyboard.press("Escape");
-        await delay(800);
+        await delay(1000);
       }
 
-      console.log("✅ Todos los descuentos aplicados");
+      console.log("\n✅ Todos los descuentos aplicados");
     }
 
     // ── CONTINUAR ────────────────────────────────────────────────────────────
