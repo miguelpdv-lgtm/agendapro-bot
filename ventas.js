@@ -249,7 +249,6 @@ async function ejecutarVenta(productos) {
         'input[type="text"]'
       );
 
-      // limpiar input
       await frame.evaluate(() => {
         const input =
           document.querySelector(
@@ -399,6 +398,42 @@ async function ejecutarVenta(productos) {
         `✅ ${prod.nombre} agregado`
       );
     }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // IR AL CARRITO
+    // ───────────────────────────────────────────────────────────────────────
+    console.log("🛒 Ir al carrito...");
+
+    await frame.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some(
+        (b) =>
+          b.innerText
+            ?.toLowerCase()
+            .includes("ir al carro")
+      )
+    );
+
+    await frame.evaluate(() => {
+      const btn = Array.from(
+        document.querySelectorAll("button")
+      ).find((b) =>
+        b.innerText
+          ?.toLowerCase()
+          .includes("ir al carro")
+      );
+
+      if (btn) {
+        btn.scrollIntoView({
+          block: "center",
+        });
+
+        btn.click();
+      }
+    });
+
+    await delay(2500);
+
+    console.log("✅ Dentro del carrito");
 
     // ───────────────────────────────────────────────────────────────────────
     // DESCUENTOS
@@ -596,7 +631,6 @@ async function ejecutarVenta(productos) {
 
         await delay(500);
 
-        // ENTER
         await page.keyboard.press(
           "Enter"
         );
