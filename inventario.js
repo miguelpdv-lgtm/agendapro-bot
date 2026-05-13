@@ -98,7 +98,6 @@ function limpiarPrecio(valor) {
 async function actualizarStockEnSupabase(productos) {
   console.log('\n☁️  Sincronizando stock, precios y nombres con Supabase...\n');
 
-  // AGREGADO: Se consulta también la columna 'nombre'
   const { data: stockActual, error: errorLectura } = await supabase
     .from('products')
     .select('id, stock, precio, nombre'); 
@@ -113,7 +112,7 @@ async function actualizarStockEnSupabase(productos) {
     mapaProductos[String(row.id)] = {
       stock:  row.stock,
       precio: row.precio,
-      nombre: row.nombre, // Guardamos el nombre actual
+      nombre: row.nombre,
     };
   }
 
@@ -128,7 +127,7 @@ async function actualizarStockEnSupabase(productos) {
   let errores       = 0;
   let cambiosStock  = 0;
   let cambiosPrecio = 0;
-  let cambiosNombre = 0; // Nuevo contador
+  let cambiosNombre = 0;
 
   for (const prod of productos) {
     const id     = String(prod.id || '').trim();
@@ -151,7 +150,6 @@ async function actualizarStockEnSupabase(productos) {
 
     const stockCambio  = stockAnterior !== stock;
     const precioCambio = precio !== null && precioAnterior !== precio;
-    // Comparamos que el nombre no esté vacío y sea diferente al de Supabase
     const nombreCambio = nombreNuevo && nombreAnterior !== nombreNuevo; 
 
     if (!stockCambio && !precioCambio && !nombreCambio) { sinCambios++; continue; }
@@ -201,22 +199,22 @@ async function actualizarStockEnSupabase(productos) {
 
 // ── Función principal exportada ───────────────────────────────────────────────
 async function sincronizarInventario() {
-  
-  // =====================================================================
-  // NUEVO: Validación de horario (Ejecutar por última vez a las 18:30)
-  // =====================================================================
-  const ahora = new Date();
-  const hora = ahora.getHours();
-  const minutos = ahora.getMinutes();
 
-  // Si la hora es mayor a 18 (19:00+) O si son las 18 y los minutos pasan de 30 (18:31+)
+  // =====================================================================
+  // Validación de horario usando hora Colombia (no la del servidor)
+  // =====================================================================
+  const ahora    = new Date();
+  const ahoraCOL = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+  const hora     = ahoraCOL.getHours();
+  const minutos  = ahoraCOL.getMinutes();
+
   if (hora > 18 || (hora === 18 && minutos > 30)) {
-    console.log(`\n⏳ [Inventario] Omitido. Son las ${hora}:${minutos.toString().padStart(2, '0')} hrs. El script dejó de correr a las 18:30.`);
-    return; // Finalizamos ejecución tempranamente
+    console.log(`\n⏳ [Inventario] Omitido. Son las ${hora}:${minutos.toString().padStart(2, '0')} hrs Colombia. El script dejó de correr a las 18:30.`);
+    return;
   }
   // =====================================================================
 
-  console.log(`\n🔄 [Inventario] Iniciando sincronización: ${ahora.toLocaleString()}`);
+  console.log(`\n🔄 [Inventario] Iniciando sincronización: ${ahoraCOL.toLocaleString('es-CO')}`);
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -303,7 +301,7 @@ async function sincronizarInventario() {
     console.log(`💾 ${todosLosProductos.length} productos guardados`);
 
     await actualizarStockEnSupabase(todosLosProductos);
-    console.log(`✅ [Inventario] Sincronización completa: ${new Date().toLocaleString()}`);
+    console.log(`✅ [Inventario] Sincronización completa: ${ahoraCOL.toLocaleString('es-CO')}`);
 
   } catch (e) {
     console.error('❌ [Inventario] Error general:', e.message);
