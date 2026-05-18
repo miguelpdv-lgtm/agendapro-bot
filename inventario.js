@@ -1,32 +1,53 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  inventario.js — Scraping de inventario + sync Supabase
-//  Se ejecuta automáticamente cada 15 minutos desde index.js
+// inventario.js — Scraping de inventario + sync Supabase
 // ─────────────────────────────────────────────────────────────────────────────
+
 require('dotenv').config();
+
 const puppeteer = require('puppeteer');
-const fs        = require('fs');
+const fs = require('fs');
+
 const { createClient } = require('@supabase/supabase-js');
+
 const ws = require('ws');
 
-const EMAIL                     = process.env.AGENDAPRO_EMAIL;
-const PASSWORD                  = process.env.AGENDAPRO_PASSWORD;
-const SUPABASE_URL              = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const URL_INVENTARIO            = 'https://app.agendapro.com/products/inventory';
+const EMAIL = process.env.AGENDAPRO_EMAIL;
+const PASSWORD = process.env.AGENDAPRO_PASSWORD;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  realtime: { transport: ws },
-});
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const delay = ms => new Promise(r => setTimeout(r, ms));
+const URL_INVENTARIO =
+  'https://app.agendapro.com/products/inventory';
 
-// ── Helper: click al botón de login de forma resiliente ──────────────────────
+const supabase = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  {
+    realtime: {
+      transport: ws,
+    },
+  }
+);
+
+const delay = ms =>
+  new Promise(r => setTimeout(r, ms));
+
+// ─────────────────────────────────────────────────────────────
+// Login resiliente
+// ─────────────────────────────────────────────────────────────
 async function clickLoginButton(page) {
+
   const clicked = await page.evaluate(() => {
+
     const btns = [...document.querySelectorAll('button')];
 
     const loginBtn = btns.find(b => {
-      const txt = b.textContent.trim().toLowerCase();
+
+      const txt = b.textContent
+        .trim()
+        .toLowerCase();
 
       return (
         txt.includes('ingresar') ||
@@ -47,17 +68,22 @@ async function clickLoginButton(page) {
   });
 
   if (clicked) {
-    console.log('✅ Botón de login clickeado por texto');
+    console.log('✅ Botón login clickeado');
     return;
   }
 
-  console.log('⚠️ Botón no encontrado por texto → usando Enter');
+  console.log('⚠️ Login por Enter');
+
   await page.keyboard.press('Enter');
 }
 
-// ── Extrae filas de la tabla ─────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Extraer filas
+// ─────────────────────────────────────────────────────────────
 async function extraerFilas(ctx) {
+
   return await ctx.evaluate(() => {
+
     const filas = [
       ...document.querySelectorAll(
         'tbody[role="rowgroup"] tr[role="row"]'
@@ -65,9 +91,14 @@ async function extraerFilas(ctx) {
     ];
 
     return filas.map(fila => {
-      const celdas = [...fila.querySelectorAll('td[role="cell"]')];
 
-      const btnAdd = fila.querySelector('[data-testid^="add-stock-btn-"]');
+      const celdas = [
+        ...fila.querySelectorAll('td[role="cell"]'),
+      ];
+
+      const btnAdd = fila.querySelector(
+        '[data-testid^="add-stock-btn-"]'
+      );
 
       const id = btnAdd
         ? btnAdd
@@ -85,20 +116,25 @@ async function extraerFilas(ctx) {
 
       return {
         id,
-        codigo:    celdas[0]?.textContent.trim() || '',
-        nombre:    celdas[1]?.textContent.trim() || '',
-        categoria: celdas[2]?.textContent.trim() || '',
-        marca:     celdas[3]?.textContent.trim() || '',
-        formato:   celdas[4]?.textContent.trim() || '',
-        precio:    celdas[5]?.textContent.trim() || '',
+        codigo: celdas[0]?.textContent.trim() || '',
+        nombre: celdas[1]?.textContent.trim() || '',
+        categoria:
+          celdas[2]?.textContent.trim() || '',
+        marca: celdas[3]?.textContent.trim() || '',
+        formato:
+          celdas[4]?.textContent.trim() || '',
+        precio: celdas[5]?.textContent.trim() || '',
         stock,
       };
     });
   });
 }
 
-// ── CSV ──────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CSV
+// ─────────────────────────────────────────────────────────────
 function toCSV(productos) {
+
   const headers = [
     'id',
     'codigo',
@@ -120,18 +156,31 @@ function toCSV(productos) {
   return [headers.join(','), ...rows].join('\n');
 }
 
-// ── Limpia stock ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Limpiar stock
+// ─────────────────────────────────────────────────────────────
 function limpiarStock(valor) {
+
   if (valor == null) return 0;
 
-  const limpio = String(valor).replace(/[^\d-]/g, '');
+  const limpio = String(valor).replace(
+    /[^\d-]/g,
+    ''
+  );
 
-  return limpio === '' ? 0 : Number(limpio);
+  return limpio === ''
+    ? 0
+    : Number(limpio);
 }
 
-// ── Limpia precio ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Limpiar precio
+// ─────────────────────────────────────────────────────────────
 function limpiarPrecio(valor) {
-  if (valor == null || valor === '') return null;
+
+  if (valor == null || valor === '') {
+    return 0;
+  }
 
   const limpio = String(valor)
     .replace(/[^0-9,.-]/g, '')
@@ -140,11 +189,16 @@ function limpiarPrecio(valor) {
 
   const num = parseFloat(limpio);
 
-  return isNaN(num) ? null : num;
+  return isNaN(num)
+    ? 0
+    : num;
 }
 
-// ── Limpia categoría ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Limpiar categoría
+// ─────────────────────────────────────────────────────────────
 function limpiarCategoria(valor) {
+
   if (!valor) return '';
 
   return valor
@@ -153,8 +207,11 @@ function limpiarCategoria(valor) {
     .trim();
 }
 
-// ── Limpia marca ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Limpiar marca
+// ─────────────────────────────────────────────────────────────
 function limpiarMarca(valor) {
+
   if (!valor) return '';
 
   const marca = valor.trim();
@@ -166,26 +223,26 @@ function limpiarMarca(valor) {
   return marca;
 }
 
-// ── Sync Supabase ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Sync Supabase
+// ─────────────────────────────────────────────────────────────
 async function actualizarStockEnSupabase(productos) {
 
-  console.log('\n☁️ Sincronizando con Supabase...\n');
+  console.log(
+    '\n☁️ Sincronizando inventario con Supabase...\n'
+  );
 
-  const { data: stockActual, error: errorLectura } = await supabase
+  const {
+    data: stockActual,
+    error: errorLectura,
+  } = await supabase
     .from('products')
-    .select(`
-      id,
-      stock,
-      precio,
-      nombre,
-      display_name,
-      categoria,
-      marca
-    `);
+    .select('*');
 
   if (errorLectura) {
+
     console.error(
-      '❌ No se pudo leer products:',
+      '❌ Error leyendo products:',
       errorLectura.message
     );
 
@@ -195,14 +252,7 @@ async function actualizarStockEnSupabase(productos) {
   const mapaProductos = {};
 
   for (const row of stockActual) {
-    mapaProductos[String(row.id)] = {
-      stock:        row.stock,
-      precio:       row.precio,
-      nombre:       row.nombre,
-      display_name: row.display_name,
-      categoria:    row.categoria,
-      marca:        row.marca,
-    };
+    mapaProductos[String(row.id)] = row;
   }
 
   const idsIgnorados = new Set([
@@ -216,178 +266,189 @@ async function actualizarStockEnSupabase(productos) {
     '821517',
   ]);
 
-  let actualizados  = 0;
-  let sinCambios    = 0;
-  let noEncontrados = 0;
-  let errores       = 0;
-
-  let cambiosStock      = 0;
-  let cambiosPrecio     = 0;
-  let cambiosNombre     = 0;
-  let cambiosCategoria  = 0;
-  let cambiosMarca      = 0;
+  let actualizados = 0;
+  let creados = 0;
+  let errores = 0;
+  let omitidos = 0;
 
   for (const prod of productos) {
 
     const id = String(prod.id || '').trim();
 
     if (!id) continue;
-    if (idsIgnorados.has(id)) continue;
 
-    const stock          = limpiarStock(prod.stock);
-    const precio         = limpiarPrecio(prod.precio);
-    const nombreNuevo    = (prod.nombre || '').trim();
-    const categoriaNueva = limpiarCategoria(prod.categoria);
-    const marcaNueva     = limpiarMarca(prod.marca);
+    if (idsIgnorados.has(id)) {
+      continue;
+    }
 
-    if (!(id in mapaProductos)) {
-      console.warn(
-        `⚠️ ID ${id} (${prod.nombre}) no está en Supabase`
+    const stock = limpiarStock(prod.stock);
+
+    const precio = limpiarPrecio(prod.precio);
+
+    const nombreNuevo =
+      (prod.nombre || '').trim();
+
+    const categoriaNueva =
+      limpiarCategoria(prod.categoria);
+
+    const marcaNueva =
+      limpiarMarca(prod.marca);
+
+    const codigoNuevo =
+      (prod.codigo || '').trim();
+
+    const formatoNuevo =
+      (prod.formato || '').trim();
+
+    // ─────────────────────────────────────────
+    // Omitir productos "uso del salon"
+    // ─────────────────────────────────────────
+    if (
+      /uso del salon/i.test(
+        prod.categoria || ''
+      )
+    ) {
+
+      console.log(
+        `⏭️ Omitido uso del salon: ${id} | ${nombreNuevo}`
       );
 
-      noEncontrados++;
+      omitidos++;
+
       continue;
     }
 
-    const stockAnterior      = mapaProductos[id].stock;
-    const precioAnterior     = mapaProductos[id].precio;
-    const nombreAnterior     = mapaProductos[id].nombre;
-    const categoriaAnterior  = mapaProductos[id].categoria || '';
-    const marcaAnterior      = mapaProductos[id].marca || '';
+    const dataProducto = {
 
-    const stockCambio =
-      stockAnterior !== stock;
+      id: Number(id),
 
-    const precioCambio =
-      precio !== null &&
-      precioAnterior !== precio;
+      codigo: codigoNuevo || '',
 
-    const nombreCambio =
-      nombreNuevo &&
-      nombreAnterior !== nombreNuevo;
+      nombre: nombreNuevo || '',
 
-    const categoriaCambio =
-      categoriaAnterior !== categoriaNueva;
+      display_name: nombreNuevo || '',
 
-    const marcaCambio =
-      marcaAnterior !== marcaNueva;
+      categoria: categoriaNueva || '',
 
-    if (
-      !stockCambio &&
-      !precioCambio &&
-      !nombreCambio &&
-      !categoriaCambio &&
-      !marcaCambio
-    ) {
-      sinCambios++;
+      marca: marcaNueva || '',
+
+      formato: formatoNuevo || '',
+
+      precio: precio ?? 0,
+
+      stock: stock ?? 0,
+    };
+
+    // ─────────────────────────────────────────
+    // CREAR PRODUCTO
+    // ─────────────────────────────────────────
+    if (!(id in mapaProductos)) {
+
+      const { error: insertError } =
+        await supabase
+          .from('products')
+          .insert(dataProducto);
+
+      if (insertError) {
+
+        console.error(
+          `❌ Error creando ID ${id}:`,
+          insertError.message
+        );
+
+        errores++;
+
+        continue;
+      }
+
+      console.log(
+        `🆕 Producto creado | ${id} | ${nombreNuevo}`
+      );
+
+      creados++;
+
       continue;
     }
 
-    const updates = {};
+    // ─────────────────────────────────────────
+    // ACTUALIZAR PRODUCTO
+    // ─────────────────────────────────────────
+    const productoActual =
+      mapaProductos[id];
 
-    if (stockCambio) {
-      updates.stock = stock;
+    const huboCambios =
+      productoActual.codigo !==
+        dataProducto.codigo ||
+
+      productoActual.nombre !==
+        dataProducto.nombre ||
+
+      productoActual.display_name !==
+        dataProducto.display_name ||
+
+      productoActual.categoria !==
+        dataProducto.categoria ||
+
+      productoActual.marca !==
+        dataProducto.marca ||
+
+      productoActual.formato !==
+        dataProducto.formato ||
+
+      Number(productoActual.precio || 0) !==
+        Number(dataProducto.precio || 0) ||
+
+      Number(productoActual.stock || 0) !==
+        Number(dataProducto.stock || 0);
+
+    if (!huboCambios) {
+      continue;
     }
 
-    if (precioCambio) {
-      updates.precio = precio;
-    }
+    const { error: updateError } =
+      await supabase
+        .from('products')
+        .update(dataProducto)
+        .eq('id', Number(id));
 
-    if (nombreCambio) {
-      updates.nombre = nombreNuevo;
+    if (updateError) {
 
-      // display_name sincronizado automáticamente
-      updates.display_name = nombreNuevo;
-    }
-
-    if (categoriaCambio) {
-      updates.categoria = categoriaNueva;
-    }
-
-    if (marcaCambio) {
-      updates.marca = marcaNueva;
-    }
-
-    const { error } = await supabase
-      .from('products')
-      .update(updates)
-      .eq('id', Number(id));
-
-    if (error) {
       console.error(
-        `❌ Error ID ${id} (${prod.nombre}):`,
-        error.message
+        `❌ Error actualizando ID ${id}:`,
+        updateError.message
       );
 
       errores++;
+
       continue;
     }
 
-    if (stockCambio) {
-      console.log(
-        `📦 Stock ID ${id} | ${prod.nombre} → ${stockAnterior} → ${stock}`
-      );
-
-      cambiosStock++;
-    }
-
-    if (precioCambio) {
-      console.log(
-        `💰 Precio ID ${id} | ${prod.nombre} → ${precioAnterior} → ${precio}`
-      );
-
-      cambiosPrecio++;
-    }
-
-    if (nombreCambio) {
-      console.log(
-        `📝 Nombre ID ${id} | ${nombreAnterior} → ${nombreNuevo}`
-      );
-
-      cambiosNombre++;
-    }
-
-    if (categoriaCambio) {
-      console.log(
-        `🏷️ Categoría ID ${id} → "${categoriaAnterior}" → "${categoriaNueva}"`
-      );
-
-      cambiosCategoria++;
-    }
-
-    if (marcaCambio) {
-      console.log(
-        `🏢 Marca ID ${id} → "${marcaAnterior}" → "${marcaNueva}"`
-      );
-
-      cambiosMarca++;
-    }
+    console.log(
+      `✅ Actualizado | ${id} | ${nombreNuevo}`
+    );
 
     actualizados++;
   }
 
-  console.log('\n══════════════════════════════════════');
+  console.log('\n═══════════════════════════════════');
 
-  console.log(`✅ Actualizados      : ${actualizados}`);
-  console.log(`📦 Cambios stock     : ${cambiosStock}`);
-  console.log(`💰 Cambios precio    : ${cambiosPrecio}`);
-  console.log(`📝 Cambios nombre    : ${cambiosNombre}`);
-  console.log(`🏷️ Cambios categoría : ${cambiosCategoria}`);
-  console.log(`🏢 Cambios marca     : ${cambiosMarca}`);
-  console.log(`⏭️ Sin cambios       : ${sinCambios}`);
-  console.log(`⚠️ No encontrados    : ${noEncontrados}`);
-  console.log(`❌ Errores           : ${errores}`);
+  console.log(`🆕 Creados      : ${creados}`);
+  console.log(`✅ Actualizados : ${actualizados}`);
+  console.log(`⏭️ Omitidos     : ${omitidos}`);
+  console.log(`❌ Errores      : ${errores}`);
 
-  console.log('══════════════════════════════════════\n');
+  console.log('═══════════════════════════════════\n');
 }
 
-// ── Función principal ────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Función principal
+// ─────────────────────────────────────────────────────────────
 async function sincronizarInventario() {
 
-  // =====================================================================
+  // ─────────────────────────────────────────
   // Hora Colombia
-  // =====================================================================
-  const ahora    = new Date();
+  // ─────────────────────────────────────────
+  const ahora = new Date();
 
   const ahoraCOL = new Date(
     ahora.toLocaleString('en-US', {
@@ -395,27 +456,32 @@ async function sincronizarInventario() {
     })
   );
 
-  const hora    = ahoraCOL.getHours();
+  const hora = ahoraCOL.getHours();
+
   const minutos = ahoraCOL.getMinutes();
 
-  if (hora > 18 || (hora === 18 && minutos > 30)) {
+  if (
+    hora > 18 ||
+    (hora === 18 && minutos > 30)
+  ) {
 
     console.log(
-      `\n⏳ [Inventario] Omitido. Son las ${hora}:${minutos
-        .toString()
-        .padStart(2, '0')} hrs Colombia.`
+      `\n⏳ Inventario omitido (${hora}:${String(
+        minutos
+      ).padStart(2, '0')} COL)`
     );
 
     return;
   }
 
-  // =====================================================================
-
   console.log(
-    `\n🔄 [Inventario] Iniciando sincronización: ${ahoraCOL.toLocaleString('es-CO')}`
+    `\n🔄 Iniciando sync inventario: ${ahoraCOL.toLocaleString(
+      'es-CO'
+    )}`
   );
 
   const browser = await puppeteer.launch({
+
     headless: true,
 
     args: [
@@ -432,7 +498,8 @@ async function sincronizarInventario() {
     ],
 
     executablePath:
-      process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      undefined,
   });
 
   const page = await browser.newPage();
@@ -455,11 +522,13 @@ async function sincronizarInventario() {
 
   try {
 
-    console.log('🔐 Login inventario...');
+    console.log('🔐 Login AgendaPro...');
 
     await page.goto(
       'https://app.agendapro.com/login',
-      { waitUntil: 'domcontentloaded' }
+      {
+        waitUntil: 'domcontentloaded',
+      }
     );
 
     await page.waitForSelector(
@@ -489,14 +558,19 @@ async function sincronizarInventario() {
 
     await page.goto(
       URL_INVENTARIO,
-      { waitUntil: 'domcontentloaded' }
+      {
+        waitUntil: 'domcontentloaded',
+      }
     );
 
     await delay(2500);
 
     let ctx = page;
 
-    for (const frame of [page, ...page.frames()]) {
+    for (const frame of [
+      page,
+      ...page.frames(),
+    ]) {
 
       try {
 
@@ -514,23 +588,31 @@ async function sincronizarInventario() {
 
     await ctx.waitForSelector(
       'tr[role="row"]',
-      { timeout: 15000 }
+      {
+        timeout: 15000,
+      }
     );
 
     console.log('✅ Tabla encontrada');
 
-    const totalPaginas = await ctx.evaluate(() => {
+    const totalPaginas =
+      await ctx.evaluate(() => {
 
-      const input = document.querySelector(
-        '[data-testid="Table-pagination"] input[type="number"]'
-      );
+        const input =
+          document.querySelector(
+            '[data-testid="Table-pagination"] input[type="number"]'
+          );
 
-      return input
-        ? parseInt(input.getAttribute('max')) || 1
-        : 1;
-    });
+        return input
+          ? parseInt(
+              input.getAttribute('max')
+            ) || 1
+          : 1;
+      });
 
-    console.log(`📄 Total páginas: ${totalPaginas}`);
+    console.log(
+      `📄 Total páginas: ${totalPaginas}`
+    );
 
     const todosLosProductos = [];
 
@@ -541,33 +623,38 @@ async function sincronizarInventario() {
     ) {
 
       console.log(
-        `⏳ Página ${pagina} de ${totalPaginas}...`
+        `⏳ Página ${pagina}/${totalPaginas}`
       );
 
       await ctx.waitForSelector(
         'tbody[role="rowgroup"] tr[role="row"]',
-        { timeout: 10000 }
+        {
+          timeout: 10000,
+        }
       );
 
       await delay(600);
 
-      const filas = await extraerFilas(ctx);
+      const filas =
+        await extraerFilas(ctx);
 
       console.log(
-        `   ${filas.length} productos extraídos`
+        `   ${filas.length} productos`
       );
 
       todosLosProductos.push(...filas);
 
       if (pagina < totalPaginas) {
 
-        const btnSiguiente = await ctx.$(
-          '[data-testid="Table-pagination"] button:last-child'
-        );
+        const btnSiguiente =
+          await ctx.$(
+            '[data-testid="Table-pagination"] button:last-child'
+          );
 
         if (!btnSiguiente) {
+
           console.warn(
-            '⚠️ No se encontró botón Siguiente'
+            '⚠️ Botón siguiente no encontrado'
           );
 
           break;
@@ -581,7 +668,11 @@ async function sincronizarInventario() {
 
     fs.writeFileSync(
       'productos.json',
-      JSON.stringify(todosLosProductos, null, 2),
+      JSON.stringify(
+        todosLosProductos,
+        null,
+        2
+      ),
       'utf8'
     );
 
@@ -600,13 +691,13 @@ async function sincronizarInventario() {
     );
 
     console.log(
-      `✅ [Inventario] Sincronización completa: ${ahoraCOL.toLocaleString('es-CO')}`
+      `✅ Inventario sincronizado`
     );
 
   } catch (e) {
 
     console.error(
-      '❌ [Inventario] Error general:',
+      '❌ Error general:',
       e.message
     );
 
@@ -615,6 +706,7 @@ async function sincronizarInventario() {
   } finally {
 
     await page.close().catch(() => {});
+
     await browser.close().catch(() => {});
   }
 }
