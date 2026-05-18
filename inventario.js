@@ -72,7 +72,7 @@ async function clickLoginButton(page) {
     return;
   }
 
-  console.log('⚠️ Login por Enter');
+  console.log('⚠️ Login usando Enter');
 
   await page.keyboard.press('Enter');
 }
@@ -116,14 +116,25 @@ async function extraerFilas(ctx) {
 
       return {
         id,
-        codigo: celdas[0]?.textContent.trim() || '',
-        nombre: celdas[1]?.textContent.trim() || '',
+
+        // TU TABLA USA sku, NO codigo
+        sku: celdas[0]?.textContent.trim() || '',
+
+        nombre:
+          celdas[1]?.textContent.trim() || '',
+
         categoria:
           celdas[2]?.textContent.trim() || '',
-        marca: celdas[3]?.textContent.trim() || '',
+
+        marca:
+          celdas[3]?.textContent.trim() || '',
+
         formato:
           celdas[4]?.textContent.trim() || '',
-        precio: celdas[5]?.textContent.trim() || '',
+
+        precio:
+          celdas[5]?.textContent.trim() || '',
+
         stock,
       };
     });
@@ -137,7 +148,7 @@ function toCSV(productos) {
 
   const headers = [
     'id',
-    'codigo',
+    'sku',
     'nombre',
     'categoria',
     'marca',
@@ -163,10 +174,8 @@ function limpiarStock(valor) {
 
   if (valor == null) return 0;
 
-  const limpio = String(valor).replace(
-    /[^\d-]/g,
-    ''
-  );
+  const limpio = String(valor)
+    .replace(/[^\d-]/g, '');
 
   return limpio === ''
     ? 0
@@ -191,7 +200,7 @@ function limpiarPrecio(valor) {
 
   return isNaN(num)
     ? 0
-    : num;
+    : Math.round(num);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -216,6 +225,7 @@ function limpiarMarca(valor) {
 
   const marca = valor.trim();
 
+  // Vaciar Universo Capilar
   if (/universo capilar/i.test(marca)) {
     return '';
   }
@@ -266,10 +276,10 @@ async function actualizarStockEnSupabase(productos) {
     '821517',
   ]);
 
-  let actualizados = 0;
   let creados = 0;
-  let errores = 0;
+  let actualizados = 0;
   let omitidos = 0;
+  let errores = 0;
 
   for (const prod of productos) {
 
@@ -281,27 +291,8 @@ async function actualizarStockEnSupabase(productos) {
       continue;
     }
 
-    const stock = limpiarStock(prod.stock);
-
-    const precio = limpiarPrecio(prod.precio);
-
-    const nombreNuevo =
-      (prod.nombre || '').trim();
-
-    const categoriaNueva =
-      limpiarCategoria(prod.categoria);
-
-    const marcaNueva =
-      limpiarMarca(prod.marca);
-
-    const codigoNuevo =
-      (prod.codigo || '').trim();
-
-    const formatoNuevo =
-      (prod.formato || '').trim();
-
     // ─────────────────────────────────────────
-    // Omitir productos "uso del salon"
+    // OMITIR "uso del salon"
     // ─────────────────────────────────────────
     if (
       /uso del salon/i.test(
@@ -310,7 +301,7 @@ async function actualizarStockEnSupabase(productos) {
     ) {
 
       console.log(
-        `⏭️ Omitido uso del salon: ${id} | ${nombreNuevo}`
+        `⏭️ Omitido uso del salon | ${id} | ${prod.nombre}`
       );
 
       omitidos++;
@@ -322,25 +313,34 @@ async function actualizarStockEnSupabase(productos) {
 
       id: Number(id),
 
-      codigo: codigoNuevo || '',
+      // TU DB USA sku
+      sku: (prod.sku || '').trim(),
 
-      nombre: nombreNuevo || '',
+      nombre:
+        (prod.nombre || '').trim(),
 
-      display_name: nombreNuevo || '',
+      // display_name = nombre
+      display_name:
+        (prod.nombre || '').trim(),
 
-      categoria: categoriaNueva || '',
+      categoria:
+        limpiarCategoria(prod.categoria),
 
-      marca: marcaNueva || '',
+      marca:
+        limpiarMarca(prod.marca),
 
-      formato: formatoNuevo || '',
+      formato:
+        (prod.formato || '').trim(),
 
-      precio: precio ?? 0,
+      precio:
+        limpiarPrecio(prod.precio),
 
-      stock: stock ?? 0,
+      stock:
+        limpiarStock(prod.stock),
     };
 
     // ─────────────────────────────────────────
-    // CREAR PRODUCTO
+    // CREAR
     // ─────────────────────────────────────────
     if (!(id in mapaProductos)) {
 
@@ -352,7 +352,7 @@ async function actualizarStockEnSupabase(productos) {
       if (insertError) {
 
         console.error(
-          `❌ Error creando ID ${id}:`,
+          `❌ Error creando ${id}:`,
           insertError.message
         );
 
@@ -362,7 +362,7 @@ async function actualizarStockEnSupabase(productos) {
       }
 
       console.log(
-        `🆕 Producto creado | ${id} | ${nombreNuevo}`
+        `🆕 Producto creado | ${id} | ${dataProducto.nombre}`
       );
 
       creados++;
@@ -370,41 +370,44 @@ async function actualizarStockEnSupabase(productos) {
       continue;
     }
 
-    // ─────────────────────────────────────────
-    // ACTUALIZAR PRODUCTO
-    // ─────────────────────────────────────────
-    const productoActual =
-      mapaProductos[id];
+    const actual = mapaProductos[id];
 
+    // ─────────────────────────────────────────
+    // Detectar cambios
+    // ─────────────────────────────────────────
     const huboCambios =
-      productoActual.codigo !==
-        dataProducto.codigo ||
 
-      productoActual.nombre !==
+      (actual.sku || '') !==
+        dataProducto.sku ||
+
+      (actual.nombre || '') !==
         dataProducto.nombre ||
 
-      productoActual.display_name !==
+      (actual.display_name || '') !==
         dataProducto.display_name ||
 
-      productoActual.categoria !==
+      (actual.categoria || '') !==
         dataProducto.categoria ||
 
-      productoActual.marca !==
+      (actual.marca || '') !==
         dataProducto.marca ||
 
-      productoActual.formato !==
+      (actual.formato || '') !==
         dataProducto.formato ||
 
-      Number(productoActual.precio || 0) !==
+      Number(actual.precio || 0) !==
         Number(dataProducto.precio || 0) ||
 
-      Number(productoActual.stock || 0) !==
+      Number(actual.stock || 0) !==
         Number(dataProducto.stock || 0);
 
     if (!huboCambios) {
       continue;
     }
 
+    // ─────────────────────────────────────────
+    // UPDATE
+    // ─────────────────────────────────────────
     const { error: updateError } =
       await supabase
         .from('products')
@@ -424,7 +427,7 @@ async function actualizarStockEnSupabase(productos) {
     }
 
     console.log(
-      `✅ Actualizado | ${id} | ${nombreNuevo}`
+      `✅ Actualizado | ${id} | ${dataProducto.nombre}`
     );
 
     actualizados++;
@@ -445,9 +448,7 @@ async function actualizarStockEnSupabase(productos) {
 // ─────────────────────────────────────────────────────────────
 async function sincronizarInventario() {
 
-  // ─────────────────────────────────────────
   // Hora Colombia
-  // ─────────────────────────────────────────
   const ahora = new Date();
 
   const ahoraCOL = new Date(
@@ -691,7 +692,7 @@ async function sincronizarInventario() {
     );
 
     console.log(
-      `✅ Inventario sincronizado`
+      '✅ Inventario sincronizado'
     );
 
   } catch (e) {
