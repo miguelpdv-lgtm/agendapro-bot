@@ -7,8 +7,8 @@ require('dotenv').config();
 const puppeteer = require('puppeteer');
 const fs        = require('fs');
 
-const { createClient }              = require('@supabase/supabase-js');
-const ws                            = require('ws');
+const { createClient }                = require('@supabase/supabase-js');
+const ws                              = require('ws');
 const { notificarError, notificarOk } = require('./notificar');
 
 const EMAIL    = process.env.AGENDAPRO_EMAIL;
@@ -26,7 +26,6 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 
 // ─────────────────────────────────────────────────────────────
 // waitForSelectorSafe — nunca lanza, devuelve el elemento o null
-// Reemplaza todos los waitForSelector de la app
 // ─────────────────────────────────────────────────────────────
 async function waitForSelectorSafe(ctx, selector, timeout = 15000) {
   try {
@@ -38,8 +37,35 @@ async function waitForSelectorSafe(ctx, selector, timeout = 15000) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// matarChromeSiHay — cierra procesos chrome huérfanos en Linux
+// Previene el "fork: Resource temporarily unavailable"
+// ─────────────────────────────────────────────────────────────
+async function matarChromeSiHay() {
+  try {
+    const { execSync } = require('child_process');
+    execSync('pkill -f "chrome" || true', { stdio: 'ignore' });
+    await delay(1500); // darle tiempo al SO para liberar fds
+    console.log('🧹 Procesos chrome anteriores limpiados');
+  } catch (_) {
+    // Si falla el pkill no es crítico
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// cerrarBrowser — cierra de forma segura sin lanzar
+// ─────────────────────────────────────────────────────────────
+async function cerrarBrowser(browser) {
+  if (!browser) return;
+  try {
+    const pages = await browser.pages().catch(() => []);
+    await Promise.all(pages.map(p => p.close().catch(() => {})));
+    await browser.close().catch(() => {});
+  } catch (_) {}
+}
+
+// ─────────────────────────────────────────────────────────────
 // conReintentos — ejecuta fn hasta maxIntentos veces
-// Espera delay creciente entre cada fallo (backoff)
+// Limpia Chrome antes de cada reintento para liberar recursos
 // ─────────────────────────────────────────────────────────────
 async function conReintentos(fn, { maxIntentos = 3, etiqueta = 'operación' } = {}) {
   let ultimoError;
@@ -49,12 +75,13 @@ async function conReintentos(fn, { maxIntentos = 3, etiqueta = 'operación' } = 
       return await fn(intento);
     } catch (e) {
       ultimoError = e;
-      const espera = intento * 3000; // 3s, 6s, 9s
+      const espera = intento * 5000; // 5s, 10s, 15s (más margen para liberar recursos)
       console.warn(
         `⚠️  [${etiqueta}] Intento ${intento}/${maxIntentos} falló: ${e.message}`
       );
       if (intento < maxIntentos) {
-        console.log(`   ↻ Reintentando en ${espera / 1000}s...`);
+        console.log(`   ↻ Limpiando recursos y reintentando en ${espera / 1000}s...`);
+        await matarChromeSiHay(); // ← cerrar Chrome antes del siguiente intento
         await delay(espera);
       }
     }
@@ -68,7 +95,7 @@ async function conReintentos(fn, { maxIntentos = 3, etiqueta = 'operación' } = 
 // ─────────────────────────────────────────────────────────────
 async function clickLoginButton(page) {
   const clicked = await page.evaluate(() => {
-    const btns    = [...document.querySelectorAll('button')];
+    const btns     = [...document.querySelectorAll('button')];
     const loginBtn = btns.find(b => {
       const txt = b.textContent.trim().toLowerCase();
       return (
@@ -279,7 +306,9 @@ async function sincronizarInventario() {
 
   console.log(`\n🔄 Iniciando sync inventario: ${ahoraCOL.toLocaleString('es-CO')}`);
 
-  // ── Envolver toda la lógica en conReintentos ──
+  // Limpiar cualquier chrome colgado de corridas anteriores
+  await matarChromeSiHay();
+
   let resultado;
 
   try {
@@ -291,7 +320,6 @@ async function sincronizarInventario() {
       { maxIntentos: 3, etiqueta: 'inventario' }
     );
   } catch (e) {
-    // Todos los intentos fallaron → notificar por correo
     console.error('❌ Inventario falló tras 3 intentos:', e.message);
 
     await notificarError({
@@ -304,53 +332,48 @@ async function sincronizarInventario() {
 
     throw e;
   }
-
-  // Éxito — notificar resumen (opcional, comenta si es muy verboso)
-  // await notificarOk({
-  //   script:  'inventario.js',
-  //   resumen: `
-  //     <p>🆕 Creados: ${resultado.creados}</p>
-  //     <p>✅ Actualizados: ${resultado.actualizados}</p>
-  //     <p>⏭️ Omitidos: ${resultado.omitidos}</p>
-  //     <p>❌ Errores BD: ${resultado.errores}</p>
-  //   `,
-  // });
 }
 
 // ─────────────────────────────────────────────────────────────
 // Lógica de scraping separada (para que conReintentos la llame)
 // ─────────────────────────────────────────────────────────────
 async function _ejecutarScraping() {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--single-process',
-      '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-default-apps',
-      '--mute-audio',
-    ],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-  });
-
-  const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
-
-  await page.setRequestInterception(true);
-  page.on('request', req => {
-    if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-      req.abort();
-    } else {
-      req.continue();
-    }
-  });
+  let browser = null; // ← declarar fuera del try para que finally lo alcance siempre
 
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--mute-audio',
+        // ↓ Limites explícitos de recursos del proceso Chrome
+        '--renderer-process-limit=1',
+        '--max-old-space-size=256',
+      ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    });
+
+    const page = await browser.newPage();
+    page.setDefaultTimeout(30000);
+
+    // Bloquear recursos pesados
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     // ── Login ──
     console.log('🔐 Login AgendaPro...');
 
@@ -359,7 +382,6 @@ async function _ejecutarScraping() {
       timeout: 20000,
     });
 
-    // Esperar el campo email con timeout generoso
     const campoEmail = await waitForSelectorSafe(
       page,
       'input[placeholder="user@example.com"]',
@@ -391,7 +413,6 @@ async function _ejecutarScraping() {
       } catch (_) {}
     }
 
-    // Esperar tabla con fallback
     const tablaOk = await waitForSelectorSafe(ctx, 'tr[role="row"]', 15000);
     if (!tablaOk) {
       throw new Error('La tabla de inventario no apareció en 15s');
@@ -413,7 +434,6 @@ async function _ejecutarScraping() {
     for (let pagina = 1; pagina <= totalPaginas; pagina++) {
       console.log(`⏳ Página ${pagina}/${totalPaginas}`);
 
-      // Espera filas con manejo de error por página
       const filasOk = await waitForSelectorSafe(
         ctx,
         'tbody[role="rowgroup"] tr[role="row"]',
@@ -455,17 +475,22 @@ async function _ejecutarScraping() {
     return stats;
 
   } catch (e) {
-    // Captura screenshot del estado al fallar (útil para depurar)
+    // Screenshot del estado al fallar
     try {
-      await page.screenshot({ path: `error_inventario_${Date.now()}.png` });
-      console.log('📸 Screenshot guardado');
+      if (browser) {
+        const pages = await browser.pages().catch(() => []);
+        if (pages.length > 0) {
+          await pages[0].screenshot({ path: `error_inventario_${Date.now()}.png` });
+          console.log('📸 Screenshot guardado');
+        }
+      }
     } catch (_) {}
 
     throw e; // re-lanzar para que conReintentos lo maneje
 
   } finally {
-    await page.close().catch(() => {});
-    await browser.close().catch(() => {});
+    // ← Siempre se ejecuta, incluso si puppeteer.launch() lanzó
+    await cerrarBrowser(browser);
   }
 }
 
