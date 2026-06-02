@@ -2,6 +2,7 @@
 //  cola.js — Cola FIFO, un worker a la vez
 // ─────────────────────────────────────────────────────────────────────────────
 const { EventEmitter } = require('events');
+const { notificarError } = require('./notificar');
 
 class Cola extends EventEmitter {
   constructor() {
@@ -36,6 +37,28 @@ class Cola extends EventEmitter {
     } catch (err) {
       trabajo.reject(err);
       console.error(`❌ [Cola] Trabajo #${trabajo.id} falló:`, err.message);
+
+      // ── Notificar si ventas.js no lo hizo (ej: error antes del try/catch) ─
+      // ventas.js ya notifica errores internos; aquí capturamos cualquier
+      // error que se escape fuera de ejecutarVenta (ej: crash al arrancar browser)
+      // El doble envío no ocurre porque ventas.js re-lanza después de notificar.
+      // Si quieres evitar el doble envío completamente, agrega una propiedad:
+      //   err._notificado = true  en ventas.js, y chequea acá.
+      if (!err._notificado) {
+        const nombresProductos = trabajo.productos
+          .map((p) => `${p.nombre} x${p.cantidad}`)
+          .join(', ');
+
+        await notificarError({
+          asunto: `❌ [Cola] Trabajo #${trabajo.id} fallido`,
+          script: 'cola.js → ventas.js',
+          error: err.message,
+          contexto: `Productos: ${nombresProductos}`,
+          intento: trabajo.id,
+        }).catch((e) =>
+          console.error('❌ No se pudo enviar alerta de cola:', e.message)
+        );
+      }
     } finally {
       this._ocupado = false;
       setImmediate(() => this._procesar());
