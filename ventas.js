@@ -205,11 +205,11 @@ async function ejecutarVenta(productos) {
 
       console.log(`🔍 Buscando ${prod.nombre}`);
 
-      // ── FIX: usar trim() para ignorar espacios extra en data-testid ─────────
+      // ── FIX: normalizar testid — quitar espacios antes/después del guión ──
       await frame.waitForFunction(
         (nombre) =>
           Array.from(document.querySelectorAll("[data-testid]")).some(
-            (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
           ),
         { timeout: 10000 },
         prod.nombre
@@ -217,7 +217,7 @@ async function ejecutarVenta(productos) {
 
       await frame.evaluate((nombre) => {
         const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-          (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+          (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
         );
         el?.click();
       }, prod.nombre);
@@ -254,19 +254,18 @@ async function ejecutarVenta(productos) {
       // ─────────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         for (let i = 1; i < prod.cantidad; i++) {
-          // ── FIX: trim() para ignorar espacios extra ───────────────────────
+          // ── FIX: normalizar testid ────────────────────────────────────────
           await frame.evaluate((nombre) => {
             const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-              (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
             );
             el?.click();
           }, prod.nombre);
 
-          // ── FIX: trim() para ignorar espacios extra ───────────────────────
           await frame.waitForFunction(
             (nombre) =>
               Array.from(document.querySelectorAll("[data-testid]")).some(
-                (el) => el.dataset.testid.trim() === `${nombre}-add`
+                (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-add`
               ),
             { timeout: 10000 },
             prod.nombre
@@ -274,7 +273,7 @@ async function ejecutarVenta(productos) {
 
           await frame.evaluate((nombre) => {
             const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-              (el) => el.dataset.testid.trim() === `${nombre}-add`
+              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-add`
             );
             el?.click();
           }, prod.nombre);
@@ -331,11 +330,11 @@ async function ejecutarVenta(productos) {
         // Esperar que el carrito termine de renderizar
         await delay(1500);
 
-        // ── FIX: buscar por testid que CONTENGA el nombre (ignora espacios extra)
+        // ── FIX: normalizar testid — quitar espacios antes/después del guión ──
         await frame.waitForFunction(
           (nombre) =>
             Array.from(document.querySelectorAll("[data-testid]")).some(
-              (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
+              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
             ),
           { timeout: 20000 },
           prod.nombre
@@ -343,7 +342,7 @@ async function ejecutarVenta(productos) {
 
         await frame.evaluate((nombre) => {
           const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
-            (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
+            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
           );
           if (!btn) return;
           btn.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -353,7 +352,7 @@ async function ejecutarVenta(productos) {
 
         await frame.evaluate((nombre) => {
           const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
-            (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
+            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
           );
           if (!btn) return;
           btn.focus();
