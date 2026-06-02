@@ -326,9 +326,12 @@ async function ejecutarVenta(productos) {
       for (const prod of productosConDescuento) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
 
+        // Esperar que el carrito termine de renderizar
+        await delay(1500);
+
         await frame.waitForSelector(
           `[data-testid="edit-product-${prod.nombre}"]`,
-          { timeout: 10000 }
+          { timeout: 20000 }
         );
 
         await frame.evaluate((nombre) => {
@@ -336,7 +339,16 @@ async function ejecutarVenta(productos) {
             `[data-testid="edit-product-${nombre}"]`
           );
           if (!btn) return;
-          btn.scrollIntoView({ block: "center" });
+          btn.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, prod.nombre);
+
+        await delay(500);
+
+        await frame.evaluate((nombre) => {
+          const btn = document.querySelector(
+            `[data-testid="edit-product-${nombre}"]`
+          );
+          if (!btn) return;
           btn.focus();
           btn.click();
         }, prod.nombre);
