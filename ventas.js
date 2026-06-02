@@ -205,19 +205,20 @@ async function ejecutarVenta(productos) {
 
       console.log(`🔍 Buscando ${prod.nombre}`);
 
-      // ── FIX: algunos productos tienen espacio antes del guión, otros no ───
+      // ── FIX: usar trim() para ignorar espacios extra en data-testid ─────────
       await frame.waitForFunction(
         (nombre) =>
-          !!document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
-          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
+          Array.from(document.querySelectorAll("[data-testid]")).some(
+            (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+          ),
         { timeout: 10000 },
         prod.nombre
       );
 
       await frame.evaluate((nombre) => {
-        const el =
-          document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
-          document.querySelector(`[data-testid="${nombre}-show-counter"]`);
+        const el = Array.from(document.querySelectorAll("[data-testid]")).find(
+          (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+        );
         el?.click();
       }, prod.nombre);
 
@@ -253,27 +254,28 @@ async function ejecutarVenta(productos) {
       // ─────────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         for (let i = 1; i < prod.cantidad; i++) {
-          // ── FIX: con o sin espacio antes del guión ────────────────────────
+          // ── FIX: trim() para ignorar espacios extra ───────────────────────
           await frame.evaluate((nombre) => {
-            const el =
-              document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
-              document.querySelector(`[data-testid="${nombre}-show-counter"]`);
+            const el = Array.from(document.querySelectorAll("[data-testid]")).find(
+              (el) => el.dataset.testid.trim() === `${nombre}-show-counter`
+            );
             el?.click();
           }, prod.nombre);
 
-          // ── FIX: con o sin espacio antes del guión ────────────────────────
+          // ── FIX: trim() para ignorar espacios extra ───────────────────────
           await frame.waitForFunction(
             (nombre) =>
-              !!document.querySelector(`[data-testid="${nombre} -add"]`) ||
-              !!document.querySelector(`[data-testid="${nombre}-add"]`),
+              Array.from(document.querySelectorAll("[data-testid]")).some(
+                (el) => el.dataset.testid.trim() === `${nombre}-add`
+              ),
             { timeout: 10000 },
             prod.nombre
           );
 
           await frame.evaluate((nombre) => {
-            const el =
-              document.querySelector(`[data-testid="${nombre} -add"]`) ||
-              document.querySelector(`[data-testid="${nombre}-add"]`);
+            const el = Array.from(document.querySelectorAll("[data-testid]")).find(
+              (el) => el.dataset.testid.trim() === `${nombre}-add`
+            );
             el?.click();
           }, prod.nombre);
 
@@ -328,22 +330,20 @@ async function ejecutarVenta(productos) {
 
         // Esperar que el carrito termine de renderizar
         await delay(1500);
-        // 👇 Agrega esto justo después del delay(1500) en la sección de descuentos
-const todosTestids = await frame.evaluate(() =>
-  Array.from(document.querySelectorAll("[data-testid]"))
-    .map(el => el.dataset.testid)
-    .filter(id => id.startsWith("edit-product"))
-);
-console.log("🔎 edit-product testids en carrito:", JSON.stringify(todosTestids));
 
-        await frame.waitForSelector(
-          `[data-testid="edit-product-${prod.nombre}"]`,
-          { timeout: 20000 }
+        // ── FIX: buscar por testid que CONTENGA el nombre (ignora espacios extra)
+        await frame.waitForFunction(
+          (nombre) =>
+            Array.from(document.querySelectorAll("[data-testid]")).some(
+              (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
+            ),
+          { timeout: 20000 },
+          prod.nombre
         );
 
         await frame.evaluate((nombre) => {
-          const btn = document.querySelector(
-            `[data-testid="edit-product-${nombre}"]`
+          const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
+            (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
           );
           if (!btn) return;
           btn.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -352,8 +352,8 @@ console.log("🔎 edit-product testids en carrito:", JSON.stringify(todosTestids
         await delay(500);
 
         await frame.evaluate((nombre) => {
-          const btn = document.querySelector(
-            `[data-testid="edit-product-${nombre}"]`
+          const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
+            (el) => el.dataset.testid.trim() === `edit-product-${nombre}`
           );
           if (!btn) return;
           btn.focus();
