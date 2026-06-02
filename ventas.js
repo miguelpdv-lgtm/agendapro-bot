@@ -7,6 +7,7 @@ require("dotenv").config();
 const puppeteer = require("puppeteer");
 const { createClient } = require("@supabase/supabase-js");
 const ws = require("ws");
+const { notificarError } = require("./notificar");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -196,16 +197,17 @@ async function ejecutarVenta(productos) {
 
       console.log(`🔍 Buscando ${prod.nombre}`);
 
+      // ── FIX: el data-testid tiene un espacio antes del guión ─────────────
       await frame.waitForFunction(
         (nombre) =>
-          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
+          !!document.querySelector(`[data-testid="${nombre} -show-counter"]`),
         { timeout: 10000 },
         prod.nombre
       );
 
       await frame.evaluate((nombre) => {
         document
-          .querySelector(`[data-testid="${nombre}-show-counter"]`)
+          .querySelector(`[data-testid="${nombre} -show-counter"]`)
           ?.click();
       }, prod.nombre);
 
@@ -241,17 +243,19 @@ async function ejecutarVenta(productos) {
       // ─────────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         for (let i = 1; i < prod.cantidad; i++) {
+          // ── FIX: espacio antes del guión ──────────────────────────────────
           await frame.evaluate((nombre) => {
             document
-              .querySelector(`[data-testid="${nombre}-show-counter"]`)
+              .querySelector(`[data-testid="${nombre} -show-counter"]`)
               ?.click();
           }, prod.nombre);
 
-          await frame.waitForSelector(`[data-testid="${prod.nombre}-add"]`);
+          // ── FIX: espacio antes del guión ──────────────────────────────────
+          await frame.waitForSelector(`[data-testid="${prod.nombre} -add"]`);
 
           await frame.evaluate((nombre) => {
             document
-              .querySelector(`[data-testid="${nombre}-add"]`)
+              .querySelector(`[data-testid="${nombre} -add"]`)
               ?.click();
           }, prod.nombre);
 
@@ -300,10 +304,6 @@ async function ejecutarVenta(productos) {
       for (const prod of productosConDescuento) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
 
-        // ───────────────────────────────────────────────────────────────────
-        // ABRIR DRAWER — click nativo DOM dentro del evaluate
-        // (CDP click no dispara los handlers de React en este iframe)
-        // ───────────────────────────────────────────────────────────────────
         await frame.waitForSelector(
           `[data-testid="edit-product-${prod.nombre}"]`,
           { timeout: 10000 }
@@ -316,14 +316,11 @@ async function ejecutarVenta(productos) {
           if (!btn) return;
           btn.scrollIntoView({ block: "center" });
           btn.focus();
-          btn.click(); // click() nativo del DOM — dispara React handlers
+          btn.click();
         }, prod.nombre);
 
         console.log("✅ Card clickeada");
 
-        // ───────────────────────────────────────────────────────────────────
-        // ESPERAR INPUT DE DESCUENTO
-        // ───────────────────────────────────────────────────────────────────
         console.log("⏳ Esperando input de descuento...");
 
         await frame.waitForFunction(
@@ -334,9 +331,6 @@ async function ejecutarVenta(productos) {
 
         console.log("✅ Input descuento encontrado");
 
-        // ───────────────────────────────────────────────────────────────────
-        // SETEAR DESCUENTO (React controlled input — native setter)
-        // ───────────────────────────────────────────────────────────────────
         console.log(`✏️ Aplicando ${prod.discount_pct}%`);
 
         await frame.evaluate((pct) => {
@@ -361,7 +355,6 @@ async function ejecutarVenta(productos) {
 
         await delay(500);
 
-        // Presionar Enter dentro del frame para confirmar
         await frame.evaluate(() => {
           const el = document.querySelector(
             'input[data-testid$="unitDiscount"]'
@@ -377,9 +370,6 @@ async function ejecutarVenta(productos) {
 
         await delay(800);
 
-        // ───────────────────────────────────────────────────────────────────
-        // VALIDAR
-        // ───────────────────────────────────────────────────────────────────
         const valorFinal = await frame.evaluate(() => {
           const el = document.querySelector(
             'input[data-testid$="unitDiscount"]'
@@ -397,9 +387,6 @@ async function ejecutarVenta(productos) {
 
         console.log("✅ Descuento confirmado");
 
-        // ───────────────────────────────────────────────────────────────────
-        // CERRAR DRAWER — buscar botón guardar o presionar Escape
-        // ───────────────────────────────────────────────────────────────────
         const cerrado = await frame.evaluate(() => {
           const guardar = Array.from(
             document.querySelectorAll("button")
@@ -470,6 +457,17 @@ async function ejecutarVenta(productos) {
     console.log("✅ Transferencia Bancaria seleccionada");
 
     await delay(3000);
+
+  } catch (err) {
+    // ── Notificar por correo cualquier error dentro de la venta ─────────────
+    const nombresProductos = productos.map((p) => `${p.nombre} x${p.cantidad}`).join(", ");
+    await notificarError({
+      asunto: "❌ Venta fallida — AgendaPro Bot",
+      script: "ventas.js",
+      error: err.message,
+      contexto: `Productos: ${nombresProductos}`,
+    });
+    throw err; // re-lanzar para que cola.js también lo registre
   } finally {
     await browser.close();
   }
