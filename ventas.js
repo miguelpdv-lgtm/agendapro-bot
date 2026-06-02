@@ -197,18 +197,20 @@ async function ejecutarVenta(productos) {
 
       console.log(`🔍 Buscando ${prod.nombre}`);
 
-      // ── FIX: el data-testid tiene un espacio antes del guión ─────────────
+      // ── FIX: algunos productos tienen espacio antes del guión, otros no ───
       await frame.waitForFunction(
         (nombre) =>
-          !!document.querySelector(`[data-testid="${nombre} -show-counter"]`),
+          !!document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
+          !!document.querySelector(`[data-testid="${nombre}-show-counter"]`),
         { timeout: 10000 },
         prod.nombre
       );
 
       await frame.evaluate((nombre) => {
-        document
-          .querySelector(`[data-testid="${nombre} -show-counter"]`)
-          ?.click();
+        const el =
+          document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
+          document.querySelector(`[data-testid="${nombre}-show-counter"]`);
+        el?.click();
       }, prod.nombre);
 
       // ─────────────────────────────────────────────────────────────────────
