@@ -22,6 +22,13 @@ const supabase = createClient(
 const delay = (ms) =>
   new Promise((res) => setTimeout(res, ms));
 
+// ── Helper: siempre obtiene el frame fresco del DOM ───────────────────────────
+async function getFrame(page) {
+  await page.waitForSelector('iframe[title="APIframe"]');
+  const handle = await page.$('iframe[title="APIframe"]');
+  return handle.contentFrame();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DESCUENTOS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,15 +151,13 @@ async function ejecutarVenta(productos) {
     // ───────────────────────────────────────────────────────────────────────
     await page.waitForSelector('iframe[title="APIframe"]');
 
-    const frame = await (
-      await page.$('iframe[title="APIframe"]')
-    ).contentFrame();
-
     console.log("✅ Iframe listo");
 
     // ───────────────────────────────────────────────────────────────────────
     // AGREGAR AL CARRO
     // ───────────────────────────────────────────────────────────────────────
+    let frame = await getFrame(page);
+
     await frame.waitForFunction(() =>
       Array.from(document.querySelectorAll("button")).some((b) =>
         b.innerText?.toLowerCase().includes("agregar al carro")
@@ -174,6 +179,9 @@ async function ejecutarVenta(productos) {
     // ───────────────────────────────────────────────────────────────────────
     for (const prod of productos) {
       console.log(`🛍️ ${prod.nombre} x${prod.cantidad}`);
+
+      // ── Siempre re-obtener el frame por si se recreó ──────────────────────
+      frame = await getFrame(page);
 
       await frame.waitForSelector('input[type="text"]');
 
@@ -245,20 +253,28 @@ async function ejecutarVenta(productos) {
       // ─────────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         for (let i = 1; i < prod.cantidad; i++) {
-          // ── FIX: espacio antes del guión ──────────────────────────────────
+          // ── FIX: con o sin espacio antes del guión ────────────────────────
           await frame.evaluate((nombre) => {
-            document
-              .querySelector(`[data-testid="${nombre} -show-counter"]`)
-              ?.click();
+            const el =
+              document.querySelector(`[data-testid="${nombre} -show-counter"]`) ||
+              document.querySelector(`[data-testid="${nombre}-show-counter"]`);
+            el?.click();
           }, prod.nombre);
 
-          // ── FIX: espacio antes del guión ──────────────────────────────────
-          await frame.waitForSelector(`[data-testid="${prod.nombre} -add"]`);
+          // ── FIX: con o sin espacio antes del guión ────────────────────────
+          await frame.waitForFunction(
+            (nombre) =>
+              !!document.querySelector(`[data-testid="${nombre} -add"]`) ||
+              !!document.querySelector(`[data-testid="${nombre}-add"]`),
+            { timeout: 10000 },
+            prod.nombre
+          );
 
           await frame.evaluate((nombre) => {
-            document
-              .querySelector(`[data-testid="${nombre} -add"]`)
-              ?.click();
+            const el =
+              document.querySelector(`[data-testid="${nombre} -add"]`) ||
+              document.querySelector(`[data-testid="${nombre}-add"]`);
+            el?.click();
           }, prod.nombre);
 
           await delay(300);
@@ -272,6 +288,8 @@ async function ejecutarVenta(productos) {
     // IR AL CARRITO
     // ───────────────────────────────────────────────────────────────────────
     console.log("🛒 Ir al carrito...");
+
+    frame = await getFrame(page);
 
     await frame.waitForFunction(() =>
       Array.from(document.querySelectorAll("button")).some((b) =>
@@ -302,6 +320,8 @@ async function ejecutarVenta(productos) {
 
     if (productosConDescuento.length > 0) {
       console.log("🏷️ Aplicando descuentos...");
+
+      frame = await getFrame(page);
 
       for (const prod of productosConDescuento) {
         console.log(`🔍 Buscando card carrito: ${prod.nombre}`);
@@ -417,6 +437,8 @@ async function ejecutarVenta(productos) {
     // ───────────────────────────────────────────────────────────────────────
     console.log("➡️ Continuar...");
 
+    frame = await getFrame(page);
+
     await frame.waitForFunction(() =>
       Array.from(document.querySelectorAll("button")).some((b) =>
         b.innerText?.toLowerCase().includes("continuar")
@@ -438,6 +460,8 @@ async function ejecutarVenta(productos) {
     // MÉTODO PAGO
     // ───────────────────────────────────────────────────────────────────────
     await delay(3000);
+
+    frame = await getFrame(page);
 
     await frame.waitForSelector('[data-testid="select-payment-method"]');
 
