@@ -328,6 +328,13 @@ async function ejecutarVenta(productos) {
 
         // Esperar que el carrito termine de renderizar
         await delay(1500);
+        // 👇 Agrega esto justo después del delay(1500) en la sección de descuentos
+const todosTestids = await frame.evaluate(() =>
+  Array.from(document.querySelectorAll("[data-testid]"))
+    .map(el => el.dataset.testid)
+    .filter(id => id.startsWith("edit-product"))
+);
+console.log("🔎 edit-product testids en carrito:", JSON.stringify(todosTestids));
 
         await frame.waitForSelector(
           `[data-testid="edit-product-${prod.nombre}"]`,
