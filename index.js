@@ -16,6 +16,7 @@ const express = require('express');
 const cron    = require('node-cron');
 const cola    = require('./cola');
 const { sincronizarInventario } = require('./inventario');
+const { corregirPrecios }       = require('./corregir-precios'); // ← NUEVO
 
 const app = express();
 app.use(express.json());
@@ -86,6 +87,28 @@ app.post('/inventario/sync', autenticar, (req, res) => {
     .catch(e  => console.error('❌ Sync manual falló:', e.message));
 
   res.json({ ok: true, mensaje: 'Sincronización de inventario iniciada' });
+});
+
+// ── GET /admin/fix-precios ────────────────────────────────────────────────────
+// Ruta temporal para corregir precios que quedaron en 0 por un bug de scraping.
+// Acepta la api key por header (x-api-key) o por query (?key=...) para poder
+// dispararla directo desde el navegador.
+// BÓRRALA (o al menos deja de usarla) una vez que confirmes que los precios
+// quedaron corregidos en Supabase.
+app.get('/admin/fix-precios', async (req, res) => {
+  const key = req.headers['x-api-key'] || req.query.key;
+  if (!key || key !== process.env.API_KEY) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+
+  const modo = req.query.modo === 'fix' ? 'fix' : 'dry-run';
+
+  try {
+    const resultado = await corregirPrecios(modo);
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ── GET /health ───────────────────────────────────────────────────────────────
