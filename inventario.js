@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // inventario.js — Scraping de inventario + sync Supabase (con reintentos)
+// VERSIÓN CORREGIDA: guardas anti-precio-cero
 // ─────────────────────────────────────────────────────────────────────────────
 
 require('dotenv').config();
@@ -38,17 +39,14 @@ async function waitForSelectorSafe(ctx, selector, timeout = 15000) {
 
 // ─────────────────────────────────────────────────────────────
 // matarChromeSiHay — cierra procesos chrome huérfanos en Linux
-// Previene el "fork: Resource temporarily unavailable"
 // ─────────────────────────────────────────────────────────────
 async function matarChromeSiHay() {
   try {
     const { execSync } = require('child_process');
     execSync('pkill -f "chrome" || true', { stdio: 'ignore' });
-    await delay(1500); // darle tiempo al SO para liberar fds
+    await delay(1500);
     console.log('🧹 Procesos chrome anteriores limpiados');
-  } catch (_) {
-    // Si falla el pkill no es crítico
-  }
+  } catch (_) {}
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -65,7 +63,6 @@ async function cerrarBrowser(browser) {
 
 // ─────────────────────────────────────────────────────────────
 // conReintentos — ejecuta fn hasta maxIntentos veces
-// Limpia Chrome antes de cada reintento para liberar recursos
 // ─────────────────────────────────────────────────────────────
 async function conReintentos(fn, { maxIntentos = 3, etiqueta = 'operación' } = {}) {
   let ultimoError;
@@ -75,13 +72,11 @@ async function conReintentos(fn, { maxIntentos = 3, etiqueta = 'operación' } = 
       return await fn(intento);
     } catch (e) {
       ultimoError = e;
-      const espera = intento * 5000; // 5s, 10s, 15s (más margen para liberar recursos)
-      console.warn(
-        `⚠️  [${etiqueta}] Intento ${intento}/${maxIntentos} falló: ${e.message}`
-      );
+      const espera = intento * 5000;
+      console.warn(`⚠️  [${etiqueta}] Intento ${intento}/${maxIntentos} falló: ${e.message}`);
       if (intento < maxIntentos) {
         console.log(`   ↻ Limpiando recursos y reintentando en ${espera / 1000}s...`);
-        await matarChromeSiHay(); // ← cerrar Chrome antes del siguiente intento
+        await matarChromeSiHay();
         await delay(espera);
       }
     }
@@ -189,10 +184,30 @@ function limpiarMarca(valor) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Sync Supabase
+// Sync Supabase — CON GUARDAS ANTI-PRECIO-CERO
 // ─────────────────────────────────────────────────────────────
 async function actualizarStockEnSupabase(productos) {
   console.log('\n☁️  Sincronizando inventario con Supabase...\n');
+
+  // ─── GUARDA 1: circuit breaker global ──────────────────────
+  // Si el scraping trajo demasiados precios en 0, algo salió mal
+  // (render a medio cargar, selector cambiado, etc). Abortamos
+  // sin tocar Supabase para no pisar datos buenos.
+  const conPrecio    = productos.filter(p => limpiarPrecio(p.precio) > 0).length;
+  const ratioValidos = productos.length ? conPrecio / productos.length : 0;
+
+  if (productos.length > 0 && ratioValidos < 0.8) {
+    const msg = `Sync abortado: solo ${(ratioValidos * 100).toFixed(1)}% de productos tienen precio > 0 (esperado >80%). Total: ${productos.length}, con precio válido: ${conPrecio}`;
+    console.error('🚨 ' + msg);
+    await notificarError({
+      asunto:   '🚨 Inventario: precios sospechosos, sync abortado',
+      script:   'inventario.js',
+      error:    msg,
+      contexto: 'Se detectaron demasiados precios en 0 antes de escribir a Supabase. No se modificó ningún registro.',
+      intento:  0,
+    });
+    return { creados: 0, actualizados: 0, omitidos: 0, errores: 0, abortado: true };
+  }
 
   const { data: stockActual, error: errorLectura } =
     await supabase.from('products').select('*');
@@ -212,7 +227,7 @@ async function actualizarStockEnSupabase(productos) {
     '1153445','914694','1156819','821517',
   ]);
 
-  let creados = 0, actualizados = 0, omitidos = 0, errores = 0;
+  let creados = 0, actualizados = 0, omitidos = 0, errores = 0, preciosSospechosos = 0;
 
   for (const prod of productos) {
     const id = String(prod.id || '').trim();
@@ -250,6 +265,16 @@ async function actualizarStockEnSupabase(productos) {
     }
 
     const actual = mapaProductos[id];
+
+    // ─── GUARDA 2: por producto ─────────────────────────────
+    // Nunca dejar que un precio existente > 0 se pise con un 0
+    // nuevo. Se mantiene el precio anterior y se avisa.
+    if (dataProducto.precio === 0 && Number(actual.precio || 0) > 0) {
+      console.warn(`⚠️  Precio sospechoso (0) para ${id} | ${dataProducto.nombre} — se mantiene el anterior (${actual.precio})`);
+      dataProducto.precio = Number(actual.precio);
+      preciosSospechosos++;
+    }
+
     const huboCambios =
       (actual.sku          || '') !== dataProducto.sku          ||
       (actual.nombre       || '') !== dataProducto.nombre        ||
@@ -278,35 +303,42 @@ async function actualizarStockEnSupabase(productos) {
   }
 
   console.log('\n═══════════════════════════════════');
-  console.log(`🆕 Creados      : ${creados}`);
-  console.log(`✅ Actualizados : ${actualizados}`);
-  console.log(`⏭️  Omitidos     : ${omitidos}`);
-  console.log(`❌ Errores      : ${errores}`);
+  console.log(`🆕 Creados              : ${creados}`);
+  console.log(`✅ Actualizados         : ${actualizados}`);
+  console.log(`⏭️  Omitidos             : ${omitidos}`);
+  console.log(`⚠️  Precios sospechosos  : ${preciosSospechosos} (se mantuvo el valor anterior)`);
+  console.log(`❌ Errores              : ${errores}`);
   console.log('═══════════════════════════════════\n');
 
-  return { creados, actualizados, omitidos, errores };
+  if (preciosSospechosos > 0) {
+    await notificarError({
+      asunto:   `⚠️ Inventario: ${preciosSospechosos} precios sospechosos evitados`,
+      script:   'inventario.js',
+      error:    `${preciosSospechosos} productos trajeron precio 0 desde AgendaPro pero tenían precio > 0 en Supabase. Se conservó el valor anterior en cada caso.`,
+      contexto: 'Revisar el scraping/selector de precio si esto se repite seguido.',
+      intento:  0,
+    });
+  }
+
+  return { creados, actualizados, omitidos, errores, preciosSospechosos };
 }
 
 // ─────────────────────────────────────────────────────────────
 // Función principal — con reintentos + notificación por correo
 // ─────────────────────────────────────────────────────────────
 async function sincronizarInventario() {
-  // Hora Colombia
   const ahora    = new Date();
   const ahoraCOL = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
   const hora     = ahoraCOL.getHours();
   const minutos  = ahoraCOL.getMinutes();
 
   if (hora > 18 || (hora === 18 && minutos > 30)) {
-    console.log(
-      `\n⏳ Inventario omitido (${hora}:${String(minutos).padStart(2, '0')} COL)`
-    );
+    console.log(`\n⏳ Inventario omitido (${hora}:${String(minutos).padStart(2, '0')} COL)`);
     return;
   }
 
   console.log(`\n🔄 Iniciando sync inventario: ${ahoraCOL.toLocaleString('es-CO')}`);
 
-  // Limpiar cualquier chrome colgado de corridas anteriores
   await matarChromeSiHay();
 
   let resultado;
@@ -338,7 +370,7 @@ async function sincronizarInventario() {
 // Lógica de scraping separada (para que conReintentos la llame)
 // ─────────────────────────────────────────────────────────────
 async function _ejecutarScraping() {
-  let browser = null; // ← declarar fuera del try para que finally lo alcance siempre
+  let browser = null;
 
   try {
     browser = await puppeteer.launch({
@@ -354,7 +386,6 @@ async function _ejecutarScraping() {
         '--disable-background-networking',
         '--disable-default-apps',
         '--mute-audio',
-        // ↓ Limites explícitos de recursos del proceso Chrome
         '--renderer-process-limit=1',
         '--max-old-space-size=256',
       ],
@@ -364,7 +395,6 @@ async function _ejecutarScraping() {
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
-    // Bloquear recursos pesados
     await page.setRequestInterception(true);
     page.on('request', req => {
       if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -374,7 +404,6 @@ async function _ejecutarScraping() {
       }
     });
 
-    // ── Login ──
     console.log('🔐 Login AgendaPro...');
 
     await page.goto('https://app.agendapro.com/login', {
@@ -400,11 +429,9 @@ async function _ejecutarScraping() {
     await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
     console.log('✅ Login OK');
 
-    // ── Inventario ──
     await page.goto(URL_INVENTARIO, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(2500);
 
-    // Detectar contexto (page o frame)
     let ctx = page;
     for (const frame of [page, ...page.frames()]) {
       try {
@@ -445,7 +472,16 @@ async function _ejecutarScraping() {
         continue;
       }
 
-      await delay(600);
+      // ─── FIX: más margen + esperar a que el precio no esté vacío ───
+      await delay(1500);
+      await ctx.waitForFunction(() => {
+        const primeraCelda = document.querySelector(
+          'tbody[role="rowgroup"] tr[role="row"] td[role="cell"]:nth-child(6)'
+        );
+        return primeraCelda && primeraCelda.textContent.trim() !== '';
+      }, { timeout: 8000 }).catch(() => {
+        console.warn(`⚠️  Página ${pagina}: precio de la primera fila no se pobló a tiempo`);
+      });
 
       const filas = await extraerFilas(ctx);
       console.log(`   ${filas.length} productos`);
@@ -475,7 +511,6 @@ async function _ejecutarScraping() {
     return stats;
 
   } catch (e) {
-    // Screenshot del estado al fallar
     try {
       if (browser) {
         const pages = await browser.pages().catch(() => []);
@@ -486,10 +521,9 @@ async function _ejecutarScraping() {
       }
     } catch (_) {}
 
-    throw e; // re-lanzar para que conReintentos lo maneje
+    throw e;
 
   } finally {
-    // ← Siempre se ejecuta, incluso si puppeteer.launch() lanzó
     await cerrarBrowser(browser);
   }
 }
