@@ -1,13 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ventas.js — AgendaPro Puppeteer
+// ventas.js — AgendaPro Playwright
 // ─────────────────────────────────────────────────────────────────────────────
 
 require("dotenv").config();
 
-const puppeteer = require("puppeteer");
 const { createClient } = require("@supabase/supabase-js");
 const ws = require("ws");
 const { notificarError } = require("./notificar");
+const { lanzarNavegador, escribir } = require("./navegador");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -24,8 +24,11 @@ const delay = (ms) =>
 
 // ── Helper: siempre obtiene el frame fresco del DOM ───────────────────────────
 async function getFrame(page) {
-  await page.waitForSelector('iframe[title="APIframe"]');
-  const handle = await page.$('iframe[title="APIframe"]');
+  await page.waitForSelector('iframe[title="APIframe"]', { state: "attached" });
+  const handle = await page
+    .locator('iframe[title="APIframe"]')
+    .first()
+    .elementHandle();
   return handle.contentFrame();
 }
 
@@ -66,16 +69,13 @@ async function obtenerDescuentos(productos) {
 async function ejecutarVenta(productos) {
   productos = await obtenerDescuentos(productos);
 
-  const browser = await puppeteer.launch({
-    headless: true,
+  const browser = await lanzarNavegador({
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
     ],
-    executablePath:
-      process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   });
 
   const page = await browser.newPage();
@@ -88,24 +88,29 @@ async function ejecutarVenta(productos) {
     console.log("🔐 Login...");
 
     await page.goto("https://app.agendapro.com/login", {
-      waitUntil: "networkidle2",
+      waitUntil: "networkidle",
     });
 
-    await page.waitForSelector('input[placeholder="user@example.com"]');
+    await page.waitForSelector('input[placeholder="user@example.com"]', {
+      state: "attached",
+    });
 
-    await page.type(
+    await escribir(
+      page,
       'input[placeholder="user@example.com"]',
       process.env.AGENDAPRO_EMAIL
     );
 
-    await page.type(
+    await escribir(
+      page,
       'input[placeholder="Enter your password"]',
       process.env.AGENDAPRO_PASSWORD
     );
 
-    await page.click("button");
-
-    await page.waitForNavigation({ waitUntil: "networkidle2" });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle" }),
+      page.locator("button").first().click(),
+    ]);
 
     console.log("✅ Login OK");
 
@@ -113,7 +118,7 @@ async function ejecutarVenta(productos) {
     // PAGOS
     // ───────────────────────────────────────────────────────────────────────
     await page.goto("https://app.agendapro.com/payments", {
-      waitUntil: "networkidle2",
+      waitUntil: "networkidle",
     });
 
     // ───────────────────────────────────────────────────────────────────────
@@ -136,9 +141,11 @@ async function ejecutarVenta(productos) {
     // ───────────────────────────────────────────────────────────────────────
     // CÓDIGO
     // ───────────────────────────────────────────────────────────────────────
-    await page.waitForSelector('input[placeholder="Código"]');
+    await page.waitForSelector('input[placeholder="Código"]', {
+      state: "attached",
+    });
 
-    await page.type('input[placeholder="Código"]', "0305", { delay: 80 });
+    await escribir(page, 'input[placeholder="Código"]', "0305", { delay: 80 });
 
     await page.keyboard.press("Enter");
 
@@ -149,7 +156,9 @@ async function ejecutarVenta(productos) {
     // ───────────────────────────────────────────────────────────────────────
     // IFRAME
     // ───────────────────────────────────────────────────────────────────────
-    await page.waitForSelector('iframe[title="APIframe"]');
+    await page.waitForSelector('iframe[title="APIframe"]', {
+      state: "attached",
+    });
 
     console.log("✅ Iframe listo");
 
@@ -183,7 +192,7 @@ async function ejecutarVenta(productos) {
       // ── Siempre re-obtener el frame por si se recreó ──────────────────────
       frame = await getFrame(page);
 
-      await frame.waitForSelector('input[type="text"]');
+      await frame.waitForSelector('input[type="text"]', { state: "attached" });
 
       await frame.evaluate(() => {
         const input = document.querySelector('input[type="text"]');
@@ -201,7 +210,7 @@ async function ejecutarVenta(productos) {
 
       await delay(200);
 
-      await frame.type('input[type="text"]', prod.nombre, { delay: 60 });
+      await escribir(frame, 'input[type="text"]', prod.nombre, { delay: 60 });
 
       console.log(`🔍 Buscando ${prod.nombre}`);
 
@@ -211,8 +220,8 @@ async function ejecutarVenta(productos) {
           Array.from(document.querySelectorAll("[data-testid]")).some(
             (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
           ),
-        { timeout: 10000 },
-        prod.nombre
+        prod.nombre,
+        { timeout: 10000 }
       );
 
       await frame.evaluate((nombre) => {
@@ -226,7 +235,8 @@ async function ejecutarVenta(productos) {
       // VENDEDOR
       // ─────────────────────────────────────────────────────────────────────
       await frame.waitForSelector(
-        '[data-testid="associate-item-seller-select"]'
+        '[data-testid="associate-item-seller-select"]',
+        { state: "attached" }
       );
 
       await frame.evaluate(() => {
@@ -267,8 +277,8 @@ async function ejecutarVenta(productos) {
               Array.from(document.querySelectorAll("[data-testid]")).some(
                 (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-add`
               ),
-            { timeout: 10000 },
-            prod.nombre
+            prod.nombre,
+            { timeout: 10000 }
           );
 
           await frame.evaluate((nombre) => {
@@ -336,8 +346,8 @@ async function ejecutarVenta(productos) {
             Array.from(document.querySelectorAll("[data-testid]")).some(
               (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
             ),
-          { timeout: 20000 },
-          prod.nombre
+          prod.nombre,
+          { timeout: 20000 }
         );
 
         await frame.evaluate((nombre) => {
@@ -366,6 +376,7 @@ async function ejecutarVenta(productos) {
         await frame.waitForFunction(
           () =>
             !!document.querySelector('input[data-testid$="unitDiscount"]'),
+          undefined,
           { timeout: 15000 }
         );
 
@@ -481,7 +492,9 @@ async function ejecutarVenta(productos) {
 
     frame = await getFrame(page);
 
-    await frame.waitForSelector('[data-testid="select-payment-method"]');
+    await frame.waitForSelector('[data-testid="select-payment-method"]', {
+      state: "attached",
+    });
 
     await frame.waitForFunction(() => {
       const btn = document.querySelector(

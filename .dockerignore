@@ -1,0 +1,16 @@
+# node_modules local (binarios de Windows) — pisaría el npm install del contenedor
+node_modules
+npm-debug.log*
+
+# Secretos: nunca dentro de la imagen. En Railway van como variables de entorno.
+.env
+.env.*
+!.env.example
+
+# Salidas de ejecución
+*.png
+productos.json
+productos.csv
+
+.git
+.gitignore

@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 require('dotenv').config();
 
-// ── GUARDAS GLOBALES — evitan que el proceso muera por errores de Puppeteer ──
+// ── GUARDAS GLOBALES — evitan que el proceso muera por errores de Playwright ──
 process.on('uncaughtException', (err) => {
   console.error('💥 [UNCAUGHT EXCEPTION] El proceso no morirá:', err.message);
 });

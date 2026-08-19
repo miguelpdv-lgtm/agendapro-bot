@@ -1,16 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // inventario.js — Scraping de inventario + sync Supabase (con reintentos)
 // VERSIÓN CORREGIDA: guardas anti-precio-cero
+// Migrado a Playwright
 // ─────────────────────────────────────────────────────────────────────────────
 
 require('dotenv').config();
 
-const puppeteer = require('puppeteer');
-const fs        = require('fs');
+const fs = require('fs');
 
 const { createClient }                = require('@supabase/supabase-js');
 const ws                              = require('ws');
 const { notificarError, notificarOk } = require('./notificar');
+const { lanzarNavegador, paginasDe, escribir } = require('./navegador');
 
 const EMAIL    = process.env.AGENDAPRO_EMAIL;
 const PASSWORD = process.env.AGENDAPRO_PASSWORD;
@@ -30,7 +31,7 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 // ─────────────────────────────────────────────────────────────
 async function waitForSelectorSafe(ctx, selector, timeout = 15000) {
   try {
-    const el = await ctx.waitForSelector(selector, { timeout });
+    const el = await ctx.waitForSelector(selector, { state: 'attached', timeout });
     return el;
   } catch (_) {
     return null;
@@ -44,6 +45,8 @@ async function matarChromeSiHay() {
   try {
     const { execSync } = require('child_process');
     execSync('pkill -f "chrome" || true', { stdio: 'ignore' });
+    // Playwright puede usar el binario "headless_shell" en modo headless
+    execSync('pkill -f "headless_shell" || true', { stdio: 'ignore' });
     await delay(1500);
     console.log('🧹 Procesos chrome anteriores limpiados');
   } catch (_) {}
@@ -55,7 +58,7 @@ async function matarChromeSiHay() {
 async function cerrarBrowser(browser) {
   if (!browser) return;
   try {
-    const pages = await browser.pages().catch(() => []);
+    const pages = paginasDe(browser);
     await Promise.all(pages.map(p => p.close().catch(() => {})));
     await browser.close().catch(() => {});
   } catch (_) {}
@@ -373,15 +376,16 @@ async function _ejecutarScraping() {
   let browser = null;
 
   try {
-    browser = await puppeteer.launch({
-      headless: true,
+    browser = await lanzarNavegador({
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--no-zygote',
-        '--single-process',
+        // '--single-process',  ← NO usar con Playwright: mata el navegador apenas
+        // carga la página ("Target page, context or browser has been closed").
+        // Playwright necesita el renderer en un proceso aparte para su protocolo.
         '--disable-extensions',
         '--disable-background-networking',
         '--disable-default-apps',
@@ -389,18 +393,17 @@ async function _ejecutarScraping() {
         '--renderer-process-limit=1',
         '--max-old-space-size=256',
       ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     });
 
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
-    await page.setRequestInterception(true);
-    page.on('request', req => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-        req.abort();
+    // Equivalente a page.setRequestInterception(true) + req.abort()/continue()
+    await page.route('**/*', route => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(route.request().resourceType())) {
+        route.abort().catch(() => {});
       } else {
-        req.continue();
+        route.continue().catch(() => {});
       }
     });
 
@@ -421,12 +424,14 @@ async function _ejecutarScraping() {
       throw new Error('No apareció el campo de email en el login');
     }
 
-    await page.type('input[placeholder="user@example.com"]', EMAIL,    { delay: 40 });
-    await page.type('input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
+    await escribir(page, 'input[placeholder="user@example.com"]', EMAIL,    { delay: 40 });
+    await escribir(page, 'input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
 
-    await clickLoginButton(page);
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+      clickLoginButton(page),
+    ]);
 
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
     console.log('✅ Login OK');
 
     await page.goto(URL_INVENTARIO, { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -435,7 +440,7 @@ async function _ejecutarScraping() {
     let ctx = page;
     for (const frame of [page, ...page.frames()]) {
       try {
-        const found = await frame.$('tr[role="row"]');
+        const found = await frame.locator('tr[role="row"]').count();
         if (found) { ctx = frame; break; }
       } catch (_) {}
     }
@@ -479,7 +484,7 @@ async function _ejecutarScraping() {
           'tbody[role="rowgroup"] tr[role="row"] td[role="cell"]:nth-child(6)'
         );
         return primeraCelda && primeraCelda.textContent.trim() !== '';
-      }, { timeout: 8000 }).catch(() => {
+      }, undefined, { timeout: 8000 }).catch(() => {
         console.warn(`⚠️  Página ${pagina}: precio de la primera fila no se pobló a tiempo`);
       });
 
@@ -488,9 +493,11 @@ async function _ejecutarScraping() {
       todosLosProductos.push(...filas);
 
       if (pagina < totalPaginas) {
-        const btnSiguiente = await ctx.$('[data-testid="Table-pagination"] button:last-child');
+        const btnSiguiente = ctx
+          .locator('[data-testid="Table-pagination"] button:last-child')
+          .first();
 
-        if (!btnSiguiente) {
+        if (await btnSiguiente.count() === 0) {
           console.warn('⚠️  Botón siguiente no encontrado, terminando paginación.');
           break;
         }
@@ -513,7 +520,7 @@ async function _ejecutarScraping() {
   } catch (e) {
     try {
       if (browser) {
-        const pages = await browser.pages().catch(() => []);
+        const pages = paginasDe(browser);
         if (pages.length > 0) {
           await pages[0].screenshot({ path: `error_inventario_${Date.now()}.png` });
           console.log('📸 Screenshot guardado');

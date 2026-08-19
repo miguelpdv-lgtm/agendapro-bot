@@ -1,12 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // corregir-precios.js — Re-scrapea AgendaPro y corrige precios en Supabase
 // Version "funcion exportable" para disparar desde una ruta HTTP temporal.
+// Migrado a Playwright
 // ─────────────────────────────────────────────────────────────────────────────
 
-const puppeteer = require('puppeteer');
-const fs        = require('fs');
+const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
 const ws        = require('ws');
+const { lanzarNavegador, escribir } = require('./navegador');
 
 const EMAIL    = process.env.AGENDAPRO_EMAIL;
 const PASSWORD = process.env.AGENDAPRO_PASSWORD;
@@ -23,7 +24,7 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 
 async function waitForSelectorSafe(ctx, selector, timeout = 15000) {
   try {
-    return await ctx.waitForSelector(selector, { timeout });
+    return await ctx.waitForSelector(selector, { state: 'attached', timeout });
   } catch (_) {
     return null;
   }
@@ -68,14 +69,13 @@ async function corregirPrecios(modo = 'dry-run') {
   try {
     pushLog(`Modo: ${modo.toUpperCase()}`);
 
-    browser = await puppeteer.launch({
-      headless: true,
+    browser = await lanzarNavegador({
       args: [
         '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--disable-gpu', '--no-zygote', '--single-process', '--disable-extensions',
+        // '--single-process' NO va con Playwright: mata el navegador al cargar.
+        '--disable-gpu', '--no-zygote', '--disable-extensions',
         '--disable-background-networking', '--disable-default-apps', '--mute-audio',
       ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     });
 
     const page = await browser.newPage();
@@ -87,28 +87,32 @@ async function corregirPrecios(modo = 'dry-run') {
     const campoEmail = await waitForSelectorSafe(page, 'input[placeholder="user@example.com"]', 15000);
     if (!campoEmail) throw new Error('No aparecio el campo de email en el login');
 
-    await page.type('input[placeholder="user@example.com"]', EMAIL, { delay: 40 });
-    await page.type('input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
+    await escribir(page, 'input[placeholder="user@example.com"]', EMAIL, { delay: 40 });
+    await escribir(page, 'input[placeholder="Enter your password"]', PASSWORD, { delay: 40 });
 
-    const clicked = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find(b =>
-        /ingresar|login|iniciar|entrar|sign in|acceder/i.test(b.textContent)
-      );
-      if (btn) { btn.click(); return true; }
-      return false;
-    });
-    if (!clicked) await page.keyboard.press('Enter');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+      (async () => {
+        const clicked = await page.evaluate(() => {
+          const btn = [...document.querySelectorAll('button')].find(b =>
+            /ingresar|login|iniciar|entrar|sign in|acceder/i.test(b.textContent)
+          );
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (!clicked) await page.keyboard.press('Enter');
+      })(),
+    ]);
 
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
     pushLog('Login OK');
 
-    await page.goto(URL_INVENTARIO, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(URL_INVENTARIO, { waitUntil: 'networkidle', timeout: 30000 });
     await delay(3000);
 
     let ctx = page;
     for (const frame of [page, ...page.frames()]) {
       try {
-        if (await frame.$('tr[role="row"]')) { ctx = frame; break; }
+        if (await frame.locator('tr[role="row"]').count()) { ctx = frame; break; }
       } catch (_) {}
     }
 
@@ -144,8 +148,10 @@ async function corregirPrecios(modo = 'dry-run') {
       todosLosProductos.push(...filas);
 
       if (pagina < totalPaginas) {
-        const btnSiguiente = await ctx.$('[data-testid="Table-pagination"] button:last-child');
-        if (!btnSiguiente) { pushLog('Boton siguiente no encontrado.'); break; }
+        const btnSiguiente = ctx
+          .locator('[data-testid="Table-pagination"] button:last-child')
+          .first();
+        if (await btnSiguiente.count() === 0) { pushLog('Boton siguiente no encontrado.'); break; }
         await btnSiguiente.click();
         await delay(1800);
       }

@@ -1,7 +1,6 @@
-FROM ghcr.io/puppeteer/puppeteer:22.6.0
-
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# La versión de la imagen DEBE coincidir con la versión de "playwright"
+# fijada en package.json (1.48.2). Si subes una, sube la otra.
+FROM mcr.microsoft.com/playwright:v1.48.2-jammy
 
 WORKDIR /app
 
