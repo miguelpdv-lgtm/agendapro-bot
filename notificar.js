@@ -60,6 +60,9 @@ async function notificarError({
     </div>
   `;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -73,6 +76,7 @@ async function notificarError({
         subject: asunto,
         html,
       }),
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -83,6 +87,8 @@ async function notificarError({
     }
   } catch (e) {
     console.error('❌ No se pudo enviar el correo:', e.message);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -112,6 +118,9 @@ async function notificarOk({ script, resumen }) {
     </div>
   `;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -125,6 +134,7 @@ async function notificarOk({ script, resumen }) {
         subject: `✅ ${script} — OK`,
         html,
       }),
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -133,6 +143,8 @@ async function notificarOk({ script, resumen }) {
     }
   } catch (e) {
     console.error('❌ No se pudo enviar el correo OK:', e.message);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

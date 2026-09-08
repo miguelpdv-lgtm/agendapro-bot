@@ -32,8 +32,35 @@ function lanzarNavegador({ args = [] } = {}) {
     headless: true,
     args,
     executablePath: rutaEjecutable(),
+    timeout: 30000,
   });
 }
+
+/**
+ * Mutex global para serializar el lanzamiento de Chromium.
+ * ventas.js, inventario.js y corregir-precios.js compiten por la misma RAM
+ * si lanzan Chromium en paralelo (spawn EAGAIN), así que cada flujo debe
+ * adquirir este mutex antes de lanzarNavegador() y liberarlo al terminar.
+ */
+function crearMutex() {
+  let colaEspera = Promise.resolve();
+
+  function adquirir() {
+    let liberar;
+    const listo = new Promise((resolve) => {
+      liberar = resolve;
+    });
+
+    const turno = colaEspera.then(() => liberar);
+    colaEspera = colaEspera.then(() => listo);
+
+    return turno;
+  }
+
+  return { adquirir };
+}
+
+const bloqueoNavegador = crearMutex();
 
 /**
  * Equivalente a browser.pages() de Puppeteer.
@@ -69,4 +96,5 @@ module.exports = {
   rutaEjecutable,
   paginasDe,
   escribir,
+  bloqueoNavegador,
 };

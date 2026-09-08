@@ -7,7 +7,7 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 const ws = require("ws");
 const { notificarError } = require("./notificar");
-const { lanzarNavegador, escribir } = require("./navegador");
+const { lanzarNavegador, escribir, bloqueoNavegador } = require("./navegador");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -69,19 +69,21 @@ async function obtenerDescuentos(productos) {
 async function ejecutarVenta(productos) {
   productos = await obtenerDescuentos(productos);
 
-  const browser = await lanzarNavegador({
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
-  });
-
-  const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
+  const liberar = await bloqueoNavegador.adquirir();
+  let browser;
 
   try {
+    browser = await lanzarNavegador({
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
+
+    const page = await browser.newPage();
+    page.setDefaultTimeout(30000);
     // ───────────────────────────────────────────────────────────────────────
     // LOGIN
     // ───────────────────────────────────────────────────────────────────────
@@ -526,7 +528,8 @@ async function ejecutarVenta(productos) {
     });
     throw err; // re-lanzar para que cola.js también lo registre
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
+    liberar();
   }
 }
 

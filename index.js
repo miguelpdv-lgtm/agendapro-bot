@@ -123,11 +123,20 @@ async function tickInventario() {
     return;
   }
   syncEnCurso = true;
+
+  // Watchdog: si el sync se cuelga (Chromium colgado, red caída, etc.) no
+  // queremos depender de un redeploy manual para desbloquear el scheduler.
+  const watchdog = setTimeout(() => {
+    console.error('⏰ [Scheduler] Watchdog: el sync superó 6 minutos, liberando syncEnCurso');
+    syncEnCurso = false;
+  }, 6 * 60 * 1000);
+
   try {
     await sincronizarInventario();
   } catch (error) {
     console.error('❌ [Scheduler] Error en tickInventario:', error.message);
   } finally {
+    clearTimeout(watchdog);
     syncEnCurso = false;
   }
 }

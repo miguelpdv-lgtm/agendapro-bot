@@ -11,7 +11,7 @@ const fs = require('fs');
 const { createClient }                = require('@supabase/supabase-js');
 const ws                              = require('ws');
 const { notificarError, notificarOk } = require('./notificar');
-const { lanzarNavegador, paginasDe, escribir } = require('./navegador');
+const { lanzarNavegador, paginasDe, escribir, bloqueoNavegador } = require('./navegador');
 
 const EMAIL    = process.env.AGENDAPRO_EMAIL;
 const PASSWORD = process.env.AGENDAPRO_PASSWORD;
@@ -374,6 +374,7 @@ async function sincronizarInventario() {
 // ─────────────────────────────────────────────────────────────
 async function _ejecutarScraping() {
   let browser = null;
+  const liberar = await bloqueoNavegador.adquirir();
 
   try {
     browser = await lanzarNavegador({
@@ -532,6 +533,7 @@ async function _ejecutarScraping() {
 
   } finally {
     await cerrarBrowser(browser);
+    liberar();
   }
 }
 

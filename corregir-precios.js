@@ -7,7 +7,7 @@
 const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
 const ws        = require('ws');
-const { lanzarNavegador, escribir } = require('./navegador');
+const { lanzarNavegador, escribir, bloqueoNavegador } = require('./navegador');
 
 const EMAIL    = process.env.AGENDAPRO_EMAIL;
 const PASSWORD = process.env.AGENDAPRO_PASSWORD;
@@ -65,6 +65,7 @@ async function corregirPrecios(modo = 'dry-run') {
   let browser = null;
   const log = [];
   const pushLog = (msg) => { console.log(msg); log.push(msg); };
+  const liberar = await bloqueoNavegador.adquirir();
 
   try {
     pushLog(`Modo: ${modo.toUpperCase()}`);
@@ -203,6 +204,7 @@ async function corregirPrecios(modo = 'dry-run') {
     return { ok: false, error: e.message, log };
   } finally {
     if (browser) await browser.close().catch(() => {});
+    liberar();
   }
 }
 
