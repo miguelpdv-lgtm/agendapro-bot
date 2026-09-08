@@ -71,6 +71,7 @@ async function ejecutarVenta(productos) {
 
   const liberar = await bloqueoNavegador.adquirir();
   let browser;
+  let productoActual = null;
 
   try {
     browser = await lanzarNavegador({
@@ -189,6 +190,7 @@ async function ejecutarVenta(productos) {
     // PRODUCTOS
     // ───────────────────────────────────────────────────────────────────────
     for (const prod of productos) {
+      productoActual = prod;
       console.log(`🛍️ ${prod.nombre} x${prod.cantidad}`);
 
       // ── Siempre re-obtener el frame por si se recreó ──────────────────────
@@ -212,9 +214,10 @@ async function ejecutarVenta(productos) {
 
       await delay(200);
 
-      await escribir(frame, 'input[type="text"]', prod.nombre, { delay: 60 });
+      const terminoBusqueda = prod.busqueda || prod.nombre;
+      await escribir(frame, 'input[type="text"]', terminoBusqueda, { delay: 60 });
 
-      console.log(`🔍 Buscando ${prod.nombre}`);
+      console.log(`🔍 Buscando "${terminoBusqueda}" (producto: ${prod.nombre})`);
 
       // ── FIX: normalizar testid — quitar espacios antes/después del guión ──
       await frame.waitForFunction(
@@ -520,11 +523,14 @@ async function ejecutarVenta(productos) {
   } catch (err) {
     // ── Notificar por correo cualquier error dentro de la venta ─────────────
     const nombresProductos = productos.map((p) => `${p.nombre} x${p.cantidad}`).join(", ");
+    const contextoFalla = productoActual
+      ? `Falló en: ${productoActual.nombre} x${productoActual.cantidad}. `
+      : "";
     await notificarError({
       asunto: "❌ Venta fallida — AgendaPro Bot",
       script: "ventas.js",
       error: err.message,
-      contexto: `Productos: ${nombresProductos}`,
+      contexto: `${contextoFalla}Productos: ${nombresProductos}`,
     });
     throw err; // re-lanzar para que cola.js también lo registre
   } finally {
