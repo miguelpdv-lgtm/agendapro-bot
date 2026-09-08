@@ -33,6 +33,251 @@ async function getFrame(page) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BÚSQUEDA TOLERANTE DE PRODUCTOS
+//
+// AgendaPro pinta cada producto del carro con data-testid="<nombre>-show-counter"
+// (y "<nombre>-add", "edit-product-<nombre>"), donde <nombre> es el nombre crudo
+// del catálogo. Ese nombre puede traer espacios dobles, espacios sobrantes al
+// final o tildes: hoy en el catálogo hay un caso real, "Crema  Rizadas Juba"
+// (con dos espacios después de "Crema").
+//
+// Eso rompía la venta por dos lados:
+//
+//   1. El buscador del carro no devuelve el producto cuando se le escribe el
+//      nombre completo tal cual. Buscando "Juba" sí aparecen varias opciones,
+//      pero con el nombre exacto no aparece ninguna.
+//   2. La comparación contra el data-testid era por igualdad exacta, así que
+//      cualquier diferencia de espacios o tildes entre el nombre guardado y el
+//      que muestra AgendaPro daba "producto no encontrado".
+//
+// La solución: buscar con términos cada vez más cortos (nombre completo con los
+// espacios colapsados → dos primeras palabras → palabra más larga → última
+// palabra) y comparar los nombres normalizados en vez de exigir igualdad exacta.
+// Además el listado llega paginado de a 30, así que si el producto no está en la
+// primera tanda se hace scroll para cargar las siguientes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Términos a probar, del más específico al más general.
+// El buscador de AgendaPro ignora los términos de menos de 3 caracteres.
+function terminosDeBusqueda(nombre) {
+  const limpio = String(nombre ?? "").replace(/\s+/g, " ").trim();
+  const palabras = limpio.split(" ").filter((p) => p.length >= 3);
+  const porLargo = [...palabras].sort((a, b) => b.length - a.length);
+
+  return [
+    ...new Set([
+      limpio,                          // nombre completo, ya sin espacios dobles
+      palabras.slice(0, 2).join(" "),  // dos primeras palabras
+      porLargo[0],                     // palabra más larga (la más distintiva)
+      palabras[palabras.length - 1],   // última palabra (suele ser la marca)
+    ]),
+  ].filter((t) => t && t.length >= 3);
+}
+
+// Corre DENTRO de la página: ubica el producto comparando nombres normalizados.
+// `plantilla` dice cómo está armado el data-testid del elemento buscado.
+function localizarProducto({ nombre, plantilla, accion }) {
+  const normalizar = (txt) =>
+    String(txt ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // tildes
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ") // signos y espacios raros
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const objetivo = normalizar(nombre);
+  if (!objetivo) return null;
+
+  const plantillas = {
+    "show-counter": (testid) =>
+      testid.endsWith("-show-counter")
+        ? testid.slice(0, -"-show-counter".length)
+        : null,
+    add: (testid) =>
+      testid.endsWith("-add") ? testid.slice(0, -"-add".length) : null,
+    "edit-product": (testid) =>
+      testid.startsWith("edit-product-")
+        ? testid.slice("edit-product-".length)
+        : null,
+  };
+
+  const extraer = plantillas[plantilla];
+  if (!extraer) return null;
+
+  const candidatos = [];
+  for (const el of document.querySelectorAll("[data-testid]")) {
+    const testid = el.dataset.testid;
+    const crudo = extraer(testid);
+    if (crudo === null) continue;
+    candidatos.push({ el, testid, nombre: normalizar(crudo) });
+  }
+
+  // Sólo coincidencia exacta una vez normalizado. A propósito no se acepta
+  // coincidencia parcial: "Mascarilla Nutritiva Phytomanga" es prefijo de
+  // "Mascarilla Nutritiva Phytomanga 500ml", y registrar el producto equivocado
+  // es peor que fallar.
+  const elegido = candidatos.find((c) => c.nombre === objetivo);
+  if (!elegido) return null;
+
+  if (accion === "click") {
+    elegido.el.scrollIntoView({ block: "center" });
+    // El drawer de descuento sólo abre si la tarjeta tiene el foco.
+    elegido.el.focus?.();
+    elegido.el.click();
+  }
+
+  return elegido.testid;
+}
+
+// Nombres que el buscador dejó a la vista. Sirve para que, cuando falla, la
+// alerta por correo diga contra qué se comparó en vez de sólo "no encontrado".
+async function productosVisibles(frame) {
+  try {
+    return await frame.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid$="-show-counter"]'))
+        .map((el) => el.dataset.testid.slice(0, -"-show-counter".length))
+        .slice(0, 15)
+    );
+  } catch (_) {
+    return [];
+  }
+}
+
+// Devuelve el data-testid real del producto, o null si todavía no está en el DOM.
+async function ubicarProducto(frame, nombre, plantilla) {
+  try {
+    return await frame.evaluate(localizarProducto, {
+      nombre,
+      plantilla,
+      accion: "ver",
+    });
+  } catch (_) {
+    // El frame puede haberse recreado entre reintentos.
+    return null;
+  }
+}
+
+// Igual que ubicarProducto, pero además hace click.
+async function clickProducto(frame, nombre, plantilla) {
+  return frame.evaluate(localizarProducto, {
+    nombre,
+    plantilla,
+    accion: "click",
+  });
+}
+
+// Espera a que el producto aparezca en el DOM. No lanza: devuelve null.
+async function esperarProducto(frame, nombre, plantilla, timeout = 10000) {
+  const limite = Date.now() + timeout;
+  for (;;) {
+    const testid = await ubicarProducto(frame, nombre, plantilla);
+    if (testid) return testid;
+    if (Date.now() >= limite) return null;
+    await delay(400);
+  }
+}
+
+// El listado de productos llega paginado de a 30 y carga la siguiente tanda al
+// llegar al fondo. Devuelve true si logró desplazar algo.
+async function cargarMasResultados(frame) {
+  try {
+    return await frame.evaluate(() => {
+      const ancla = document.querySelector('[data-testid$="-show-counter"]');
+      let nodo = ancla ? ancla.parentElement : null;
+
+      while (nodo && nodo !== document.body) {
+        const estilo = getComputedStyle(nodo);
+        const desplazable =
+          /(auto|scroll)/.test(estilo.overflowY) &&
+          nodo.scrollHeight > nodo.clientHeight + 8;
+
+        if (desplazable) {
+          const antes = nodo.scrollTop;
+          nodo.scrollTop = nodo.scrollHeight;
+          return nodo.scrollTop > antes;
+        }
+        nodo = nodo.parentElement;
+      }
+
+      const antes = window.scrollY;
+      window.scrollTo(0, document.body.scrollHeight);
+      return window.scrollY > antes;
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
+// Escribe un término en el buscador del carro, dejando el campo limpio antes.
+async function escribirBusqueda(frame, page, termino) {
+  await frame.waitForSelector('input[type="text"]', { state: "attached" });
+
+  await frame.evaluate(() => {
+    const input = document.querySelector('input[type="text"]');
+    if (!input) return;
+    input.focus();
+    input.select();
+  });
+
+  await delay(300);
+
+  await page.keyboard.down("Control");
+  await page.keyboard.press("KeyA");
+  await page.keyboard.up("Control");
+  await page.keyboard.press("Backspace");
+
+  await delay(200);
+
+  await escribir(frame, 'input[type="text"]', termino, { delay: 60 });
+}
+
+// Busca el producto probando términos cada vez más cortos y paginando el
+// listado. Devuelve el data-testid real; lanza si no aparece con ningún término.
+async function buscarProductoEnCarro(frame, page, prod) {
+  const terminos = prod.busqueda
+    ? [prod.busqueda]
+    : terminosDeBusqueda(prod.nombre);
+
+  for (const termino of terminos) {
+    await escribirBusqueda(frame, page, termino);
+    console.log(`🔍 Buscando "${termino}" (producto: ${prod.nombre})`);
+
+    for (let tanda = 0; tanda < 6; tanda++) {
+      const testid = await esperarProducto(
+        frame,
+        prod.nombre,
+        "show-counter",
+        tanda === 0 ? 8000 : 4000
+      );
+
+      if (testid) {
+        console.log(`✅ Encontrado en AgendaPro como "${testid}"`);
+        return testid;
+      }
+
+      if (!(await cargarMasResultados(frame))) break;
+      console.log("↕️  Cargando más resultados...");
+      await delay(900);
+    }
+
+    console.warn(
+      `⚠️  "${termino}" no devolvió el producto, probando un término más corto`
+    );
+  }
+
+  const visibles = await productosVisibles(frame);
+
+  throw new Error(
+    `No se encontró "${prod.nombre}" en el buscador de AgendaPro. ` +
+      `Términos probados: ${terminos.join(" | ")}. ` +
+      (visibles.length
+        ? `En pantalla había: ${visibles.join(", ")}`
+        : "El buscador no devolvió ningún producto.")
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DESCUENTOS
 // ─────────────────────────────────────────────────────────────────────────────
 async function obtenerDescuentos(productos) {
@@ -196,45 +441,9 @@ async function ejecutarVenta(productos) {
       // ── Siempre re-obtener el frame por si se recreó ──────────────────────
       frame = await getFrame(page);
 
-      await frame.waitForSelector('input[type="text"]', { state: "attached" });
+      await buscarProductoEnCarro(frame, page, prod);
 
-      await frame.evaluate(() => {
-        const input = document.querySelector('input[type="text"]');
-        if (!input) return;
-        input.focus();
-        input.select();
-      });
-
-      await delay(300);
-
-      await page.keyboard.down("Control");
-      await page.keyboard.press("KeyA");
-      await page.keyboard.up("Control");
-      await page.keyboard.press("Backspace");
-
-      await delay(200);
-
-      const terminoBusqueda = prod.busqueda || prod.nombre;
-      await escribir(frame, 'input[type="text"]', terminoBusqueda, { delay: 60 });
-
-      console.log(`🔍 Buscando "${terminoBusqueda}" (producto: ${prod.nombre})`);
-
-      // ── FIX: normalizar testid — quitar espacios antes/después del guión ──
-      await frame.waitForFunction(
-        (nombre) =>
-          Array.from(document.querySelectorAll("[data-testid]")).some(
-            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
-          ),
-        prod.nombre,
-        { timeout: 10000 }
-      );
-
-      await frame.evaluate((nombre) => {
-        const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-          (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
-        );
-        el?.click();
-      }, prod.nombre);
+      await clickProducto(frame, prod.nombre, "show-counter");
 
       // ─────────────────────────────────────────────────────────────────────
       // VENDEDOR
@@ -269,29 +478,22 @@ async function ejecutarVenta(productos) {
       // ─────────────────────────────────────────────────────────────────────
       if (prod.cantidad > 1) {
         for (let i = 1; i < prod.cantidad; i++) {
-          // ── FIX: normalizar testid ────────────────────────────────────────
-          await frame.evaluate((nombre) => {
-            const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-show-counter`
-            );
-            el?.click();
-          }, prod.nombre);
+          await clickProducto(frame, prod.nombre, "show-counter");
 
-          await frame.waitForFunction(
-            (nombre) =>
-              Array.from(document.querySelectorAll("[data-testid]")).some(
-                (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-add`
-              ),
+          const botonAgregar = await esperarProducto(
+            frame,
             prod.nombre,
-            { timeout: 10000 }
+            "add",
+            10000
           );
 
-          await frame.evaluate((nombre) => {
-            const el = Array.from(document.querySelectorAll("[data-testid]")).find(
-              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `${nombre}-add`
+          if (!botonAgregar) {
+            throw new Error(
+              `No apareció el botón para sumar unidades de "${prod.nombre}"`
             );
-            el?.click();
-          }, prod.nombre);
+          }
+
+          await clickProducto(frame, prod.nombre, "add");
 
           await delay(300);
         }
@@ -345,34 +547,22 @@ async function ejecutarVenta(productos) {
         // Esperar que el carrito termine de renderizar
         await delay(1500);
 
-        // ── FIX: normalizar testid — quitar espacios antes/después del guión ──
-        await frame.waitForFunction(
-          (nombre) =>
-            Array.from(document.querySelectorAll("[data-testid]")).some(
-              (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
-            ),
+        const tarjeta = await esperarProducto(
+          frame,
           prod.nombre,
-          { timeout: 20000 }
+          "edit-product",
+          20000
         );
 
-        await frame.evaluate((nombre) => {
-          const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
-            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
+        if (!tarjeta) {
+          throw new Error(
+            `No se encontró la tarjeta de "${prod.nombre}" en el carrito`
           );
-          if (!btn) return;
-          btn.scrollIntoView({ block: "center", behavior: "smooth" });
-        }, prod.nombre);
+        }
 
         await delay(500);
 
-        await frame.evaluate((nombre) => {
-          const btn = Array.from(document.querySelectorAll("[data-testid]")).find(
-            (el) => el.dataset.testid.replace(/\s*-\s*/g, "-").trim() === `edit-product-${nombre}`
-          );
-          if (!btn) return;
-          btn.focus();
-          btn.click();
-        }, prod.nombre);
+        await clickProducto(frame, prod.nombre, "edit-product");
 
         console.log("✅ Card clickeada");
 
