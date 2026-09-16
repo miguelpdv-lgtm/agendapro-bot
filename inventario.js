@@ -176,7 +176,23 @@ function limpiarPrecio(valor) {
 
 function limpiarCategoria(valor) {
   if (!valor) return '';
-  return valor.replace(/uso del salon/gi, '').replace(/\s+/g, ' ').trim();
+  return String(valor).replace(/\s+/g, ' ').trim();
+}
+
+// AgendaPro marca en la categoría los productos que son para uso interno del
+// salón y no se venden al público.
+//
+// Ojo con las tildes: la categoría real es "Uso del Salón", y la comparación
+// que había antes era /uso del salon/i, que NO la reconoce. Por eso los 15
+// productos de uso del salón terminaron publicados en la tienda, y uno de
+// ellos ("CoWash Verde Litro") alcanzó a venderse. Se comparan las categorías
+// sin tildes para que no dependa de cómo estén escritas en AgendaPro.
+function esUsoDelSalon(categoria) {
+  const sinTildes = String(categoria ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  return /uso\s+del\s+salon/i.test(sinTildes);
 }
 
 function limpiarMarca(valor) {
@@ -209,7 +225,7 @@ async function actualizarStockEnSupabase(productos) {
       contexto: 'Se detectaron demasiados precios en 0 antes de escribir a Supabase. No se modificó ningún registro.',
       intento:  0,
     });
-    return { creados: 0, actualizados: 0, omitidos: 0, errores: 0, abortado: true };
+    return { creados: 0, actualizados: 0, omitidos: 0, eliminados: 0, errores: 0, abortado: true };
   }
 
   const { data: stockActual, error: errorLectura } =
@@ -230,15 +246,34 @@ async function actualizarStockEnSupabase(productos) {
     '1153445','914694','1156819','821517',
   ]);
 
-  let creados = 0, actualizados = 0, omitidos = 0, errores = 0, preciosSospechosos = 0;
+  let creados = 0, actualizados = 0, omitidos = 0, eliminados = 0, errores = 0, preciosSospechosos = 0;
 
   for (const prod of productos) {
     const id = String(prod.id || '').trim();
     if (!id) continue;
     if (idsIgnorados.has(id)) continue;
 
-    if (/uso del salon/i.test(prod.categoria || '')) {
-      console.log(`⏭️  Omitido uso del salon | ${id} | ${prod.nombre}`);
+    if (esUsoDelSalon(prod.categoria)) {
+      // Si ya estaba publicado y después lo marcaron como uso del salón, no
+      // alcanza con omitirlo: hay que sacarlo de la tienda.
+      if (id in mapaProductos) {
+        const { error: deleteError } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', Number(id));
+
+        if (deleteError) {
+          console.error(`❌ Error eliminando ${id}:`, deleteError.message);
+          errores++;
+          continue;
+        }
+
+        console.log(`🗑️  Eliminado por ser de uso del salón | ${id} | ${prod.nombre}`);
+        eliminados++;
+        continue;
+      }
+
+      console.log(`⏭️  Omitido por ser de uso del salón | ${id} | ${prod.nombre}`);
       omitidos++;
       continue;
     }
@@ -308,7 +343,8 @@ async function actualizarStockEnSupabase(productos) {
   console.log('\n═══════════════════════════════════');
   console.log(`🆕 Creados              : ${creados}`);
   console.log(`✅ Actualizados         : ${actualizados}`);
-  console.log(`⏭️  Omitidos             : ${omitidos}`);
+  console.log(`⏭️  Omitidos             : ${omitidos} (uso del salón)`);
+  console.log(`🗑️  Eliminados           : ${eliminados} (pasaron a uso del salón)`);
   console.log(`⚠️  Precios sospechosos  : ${preciosSospechosos} (se mantuvo el valor anterior)`);
   console.log(`❌ Errores              : ${errores}`);
   console.log('═══════════════════════════════════\n');
@@ -323,7 +359,7 @@ async function actualizarStockEnSupabase(productos) {
     });
   }
 
-  return { creados, actualizados, omitidos, errores, preciosSospechosos };
+  return { creados, actualizados, omitidos, eliminados, errores, preciosSospechosos };
 }
 
 // ─────────────────────────────────────────────────────────────
